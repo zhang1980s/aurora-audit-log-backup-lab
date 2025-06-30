@@ -7,6 +7,7 @@ import (
 	"github.com/pulumi/pulumi-aws/sdk/v5/go/aws/s3"
 	"github.com/pulumi/pulumi-aws/sdk/v5/go/aws/ssm"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
+	"github.com/pulumi/pulumi/sdk/v3/go/pulumi/config"
 )
 
 // TestEnvironmentResources holds all the resources for the Aurora test environment
@@ -23,6 +24,11 @@ type TestEnvironmentResources struct {
 
 // createTestEnvironmentResources creates the Aurora test environment
 func createTestEnvironmentResources(ctx *pulumi.Context, networkResources *NetworkResources) (*TestEnvironmentResources, error) {
+	// Get configuration values
+	projectCfg := config.New(ctx, "aurora-audit-log-backup-lab")
+	ec2KeyPairName := projectCfg.Require("ec2KeyPairName")
+	ec2InstanceType := projectCfg.Require("ec2InstanceType")
+	auroraInstanceType := projectCfg.Require("auroraInstanceType")
 	// Create EC2 security group
 	ec2SecurityGroup, err := ec2.NewSecurityGroup(ctx, "ec2-sg", &ec2.SecurityGroupArgs{
 		VpcId:       networkResources.Vpc.ID(),
@@ -398,7 +404,7 @@ func createTestEnvironmentResources(ctx *pulumi.Context, networkResources *Netwo
 	// Create primary instance
 	_, err = rds.NewClusterInstance(ctx, "aurora-primary", &rds.ClusterInstanceArgs{
 		ClusterIdentifier:          cluster.ID(),
-		InstanceClass:              pulumi.String("db.t4g.medium"),
+		InstanceClass:              pulumi.String(auroraInstanceType),
 		Engine:                     pulumi.String("aurora-mysql"),
 		EngineVersion:              pulumi.String("8.0.mysql_aurora.3.04.0"),
 		DbSubnetGroupName:          subnetGroup.Name,
@@ -416,7 +422,7 @@ func createTestEnvironmentResources(ctx *pulumi.Context, networkResources *Netwo
 	// Create replica instance
 	_, err = rds.NewClusterInstance(ctx, "aurora-replica", &rds.ClusterInstanceArgs{
 		ClusterIdentifier:          cluster.ID(),
-		InstanceClass:              pulumi.String("db.t4g.medium"),
+		InstanceClass:              pulumi.String(auroraInstanceType),
 		Engine:                     pulumi.String("aurora-mysql"),
 		EngineVersion:              pulumi.String("8.0.mysql_aurora.3.04.0"),
 		DbSubnetGroupName:          subnetGroup.Name,
@@ -633,17 +639,16 @@ chmod +x /home/ec2-user/scripts/test_audit_logs.sh
 chown -R ec2-user:ec2-user /home/ec2-user/scripts
 `
 
-	// Use hardcoded key pair name as specified
-	keyPairName := "keypair-sandbox0-sin-mymac.pem"
+	// Use key pair name from configuration
 
 	// Create EC2 instance
 	ec2Instance, err := ec2.NewInstance(ctx, "aurora-ec2", &ec2.InstanceArgs{
 		Ami:                      pulumi.String(ami.Id),
-		InstanceType:             pulumi.String("t4g.micro"),
+		InstanceType:             pulumi.String(ec2InstanceType),
 		SubnetId:                 networkResources.PublicSubnet.ID(),
 		VpcSecurityGroupIds:      pulumi.StringArray{ec2SecurityGroup.ID()},
 		AssociatePublicIpAddress: pulumi.Bool(true),
-		KeyName:                  pulumi.String(keyPairName),
+		KeyName:                  pulumi.String(ec2KeyPairName),
 		IamInstanceProfile:       ec2InstanceProfile.Name,
 		UserData:                 pulumi.String(userData),
 		Tags: pulumi.StringMap{

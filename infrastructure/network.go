@@ -1,8 +1,11 @@
 package main
 
 import (
+	"fmt"
+
 	"github.com/pulumi/pulumi-aws/sdk/v5/go/aws/ec2"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
+	"github.com/pulumi/pulumi/sdk/v3/go/pulumi/config"
 )
 
 // NetworkResources holds all the networking resources
@@ -20,6 +23,13 @@ type NetworkResources struct {
 
 // createNetworkResources creates all VPC and networking components
 func createNetworkResources(ctx *pulumi.Context) (*NetworkResources, error) {
+	// Get configuration values
+	awsCfg := config.New(ctx, "aws")
+	region := awsCfg.Require("region")
+
+	projectCfg := config.New(ctx, "aurora-audit-log-backup-lab")
+	az1 := projectCfg.Require("availabilityZone1")
+	az2 := projectCfg.Require("availabilityZone2")
 	// Create VPC
 	vpc, err := ec2.NewVpc(ctx, "aurora-vpc", &ec2.VpcArgs{
 		CidrBlock: pulumi.String("10.0.0.0/16"),
@@ -35,7 +45,7 @@ func createNetworkResources(ctx *pulumi.Context) (*NetworkResources, error) {
 	publicSubnet, err := ec2.NewSubnet(ctx, "public-subnet", &ec2.SubnetArgs{
 		VpcId:            vpc.ID(),
 		CidrBlock:        pulumi.String("10.0.0.0/24"),
-		AvailabilityZone: pulumi.String("ap-southeast-1a"), // Singapore region AZ
+		AvailabilityZone: pulumi.String(az1),
 		Tags: pulumi.StringMap{
 			"Name": pulumi.String("aurora-public-subnet"),
 		},
@@ -48,7 +58,7 @@ func createNetworkResources(ctx *pulumi.Context) (*NetworkResources, error) {
 	privateSubnet1, err := ec2.NewSubnet(ctx, "private-subnet-1", &ec2.SubnetArgs{
 		VpcId:            vpc.ID(),
 		CidrBlock:        pulumi.String("10.0.1.0/24"),
-		AvailabilityZone: pulumi.String("ap-southeast-1a"), // Same AZ as public subnet
+		AvailabilityZone: pulumi.String(az1), // Same AZ as public subnet
 		Tags: pulumi.StringMap{
 			"Name": pulumi.String("aurora-private-subnet-1"),
 		},
@@ -61,7 +71,7 @@ func createNetworkResources(ctx *pulumi.Context) (*NetworkResources, error) {
 	privateSubnet2, err := ec2.NewSubnet(ctx, "private-subnet-2", &ec2.SubnetArgs{
 		VpcId:            vpc.ID(),
 		CidrBlock:        pulumi.String("10.0.2.0/24"),
-		AvailabilityZone: pulumi.String("ap-southeast-1b"), // Different AZ
+		AvailabilityZone: pulumi.String(az2), // Different AZ
 		Tags: pulumi.StringMap{
 			"Name": pulumi.String("aurora-private-subnet-2"),
 		},
@@ -84,7 +94,7 @@ func createNetworkResources(ctx *pulumi.Context) (*NetworkResources, error) {
 	// Create S3 VPC Endpoint for private subnets only
 	s3VpcEndpoint, err := ec2.NewVpcEndpoint(ctx, "s3-vpc-endpoint", &ec2.VpcEndpointArgs{
 		VpcId:           vpc.ID(),
-		ServiceName:     pulumi.String("com.amazonaws.ap-southeast-1.s3"),
+		ServiceName:     pulumi.String(fmt.Sprintf("com.amazonaws.%s.s3", region)),
 		VpcEndpointType: pulumi.String("Gateway"),
 		RouteTableIds:   pulumi.StringArray{}, // We'll associate it with private route table later
 		Tags: pulumi.StringMap{
@@ -98,7 +108,7 @@ func createNetworkResources(ctx *pulumi.Context) (*NetworkResources, error) {
 	// Create DynamoDB VPC Endpoint for private subnets
 	dynamoDBVpcEndpoint, err := ec2.NewVpcEndpoint(ctx, "dynamodb-vpc-endpoint", &ec2.VpcEndpointArgs{
 		VpcId:           vpc.ID(),
-		ServiceName:     pulumi.String("com.amazonaws.ap-southeast-1.dynamodb"),
+		ServiceName:     pulumi.String(fmt.Sprintf("com.amazonaws.%s.dynamodb", region)),
 		VpcEndpointType: pulumi.String("Gateway"),
 		RouteTableIds:   pulumi.StringArray{}, // We'll associate it with private route table later
 		Tags: pulumi.StringMap{

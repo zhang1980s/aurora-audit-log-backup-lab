@@ -1,6 +1,8 @@
 package main
 
 import (
+	"strconv"
+
 	"github.com/pulumi/pulumi-aws/sdk/v5/go/aws/cloudwatch"
 	"github.com/pulumi/pulumi-aws/sdk/v5/go/aws/dynamodb"
 	"github.com/pulumi/pulumi-aws/sdk/v5/go/aws/iam"
@@ -8,6 +10,7 @@ import (
 	"github.com/pulumi/pulumi-aws/sdk/v5/go/aws/s3"
 	"github.com/pulumi/pulumi-aws/sdk/v5/go/aws/sqs"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
+	"github.com/pulumi/pulumi/sdk/v3/go/pulumi/config"
 )
 
 // LogBackupResources holds all the resources for the log backup solution
@@ -24,6 +27,45 @@ type LogBackupResources struct {
 
 // createLogBackupResources creates all the resources for the log backup solution
 func createLogBackupResources(ctx *pulumi.Context, networkResources *NetworkResources) (*LogBackupResources, error) {
+	// Get configuration values
+	projectCfg := config.New(ctx, "aurora-audit-log-backup-lab")
+
+	// Lambda memory and timeout settings
+	dbScannerMemory, err := strconv.Atoi(projectCfg.Require("dbScannerMemory"))
+	if err != nil {
+		return nil, err
+	}
+	dbScannerTimeout, err := strconv.Atoi(projectCfg.Require("dbScannerTimeout"))
+	if err != nil {
+		return nil, err
+	}
+
+	logDetectorMemory, err := strconv.Atoi(projectCfg.Require("logDetectorMemory"))
+	if err != nil {
+		return nil, err
+	}
+	logDetectorTimeout, err := strconv.Atoi(projectCfg.Require("logDetectorTimeout"))
+	if err != nil {
+		return nil, err
+	}
+
+	logDownloaderMemory, err := strconv.Atoi(projectCfg.Require("logDownloaderMemory"))
+	if err != nil {
+		return nil, err
+	}
+	logDownloaderTimeout, err := strconv.Atoi(projectCfg.Require("logDownloaderTimeout"))
+	if err != nil {
+		return nil, err
+	}
+
+	// Other settings
+	eventBridgeSchedule := projectCfg.Require("eventBridgeSchedule")
+	s3LogPrefix := projectCfg.Require("s3LogPrefix")
+
+	lambdaBatchSize, err := strconv.Atoi(projectCfg.Require("lambdaBatchSize"))
+	if err != nil {
+		return nil, err
+	}
 	// Get ECR repositories
 	ecrResources, err := createEcrResources(ctx)
 	if err != nil {
@@ -203,8 +245,8 @@ func createLogBackupResources(ctx *pulumi.Context, networkResources *NetworkReso
 		PackageType: pulumi.String("Image"),
 		ImageUri:    pulumi.Sprintf("%s:latest", ecrResources.DbScannerRepository.RepositoryUrl),
 		Role:        lambdaRole.Arn,
-		MemorySize:  pulumi.Int(128),
-		Timeout:     pulumi.Int(30),
+		MemorySize:  pulumi.Int(dbScannerMemory),
+		Timeout:     pulumi.Int(dbScannerTimeout),
 		Architectures: pulumi.StringArray{
 			pulumi.String("arm64"),
 		},
@@ -233,8 +275,8 @@ func createLogBackupResources(ctx *pulumi.Context, networkResources *NetworkReso
 		PackageType: pulumi.String("Image"),
 		ImageUri:    pulumi.Sprintf("%s:latest", ecrResources.LogDetectorRepository.RepositoryUrl),
 		Role:        lambdaRole.Arn,
-		MemorySize:  pulumi.Int(256),
-		Timeout:     pulumi.Int(60),
+		MemorySize:  pulumi.Int(logDetectorMemory),
+		Timeout:     pulumi.Int(logDetectorTimeout),
 		Architectures: pulumi.StringArray{
 			pulumi.String("arm64"),
 		},
@@ -263,8 +305,8 @@ func createLogBackupResources(ctx *pulumi.Context, networkResources *NetworkReso
 		PackageType: pulumi.String("Image"),
 		ImageUri:    pulumi.Sprintf("%s:latest", ecrResources.LogDownloaderRepository.RepositoryUrl),
 		Role:        lambdaRole.Arn,
-		MemorySize:  pulumi.Int(512),
-		Timeout:     pulumi.Int(300), // 5 minutes
+		MemorySize:  pulumi.Int(logDownloaderMemory),
+		Timeout:     pulumi.Int(logDownloaderTimeout),
 		Architectures: pulumi.StringArray{
 			pulumi.String("arm64"),
 		},
@@ -279,7 +321,7 @@ func createLogBackupResources(ctx *pulumi.Context, networkResources *NetworkReso
 			Variables: pulumi.StringMap{
 				"DYNAMODB_TABLE_NAME": dynamoTable.Name,
 				"S3_BUCKET_NAME":      logBucket.ID(),
-				"S3_PREFIX":           pulumi.String("logs"),
+				"S3_PREFIX":           pulumi.String(s3LogPrefix),
 			},
 		},
 		Tags: pulumi.StringMap{
@@ -292,7 +334,7 @@ func createLogBackupResources(ctx *pulumi.Context, networkResources *NetworkReso
 
 	// Create EventBridge rule to trigger DB Scanner Lambda
 	eventRule, err := cloudwatch.NewEventRule(ctx, "aurora-db-scanner-schedule", &cloudwatch.EventRuleArgs{
-		ScheduleExpression: pulumi.String("rate(15 minutes)"),
+		ScheduleExpression: pulumi.String(eventBridgeSchedule),
 		Description:        pulumi.String("Trigger Aurora DB Scanner Lambda every 15 minutes"),
 		Tags: pulumi.StringMap{
 			"Name": pulumi.String("aurora-db-scanner-schedule"),
@@ -326,7 +368,7 @@ func createLogBackupResources(ctx *pulumi.Context, networkResources *NetworkReso
 	_, err = lambda.NewEventSourceMapping(ctx, "aurora-log-detector-sqs-mapping", &lambda.EventSourceMappingArgs{
 		EventSourceArn: queue.Arn,
 		FunctionName:   logDetectorLambda.Arn,
-		BatchSize:      pulumi.Int(10),
+		BatchSize:      pulumi.Int(lambdaBatchSize),
 	})
 	if err != nil {
 		return nil, err
@@ -337,7 +379,7 @@ func createLogBackupResources(ctx *pulumi.Context, networkResources *NetworkReso
 		EventSourceArn:   dynamoTable.StreamArn,
 		FunctionName:     logDownloaderLambda.Arn,
 		StartingPosition: pulumi.String("LATEST"),
-		BatchSize:        pulumi.Int(10),
+		BatchSize:        pulumi.Int(lambdaBatchSize),
 	})
 	if err != nil {
 		return nil, err
