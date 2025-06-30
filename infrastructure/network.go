@@ -5,22 +5,21 @@ import (
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 )
 
-// VpcResources holds all the networking resources
-type VpcResources struct {
-	vpc                 *ec2.Vpc
-	publicSubnet        *ec2.Subnet
-	privateSubnet1      *ec2.Subnet
-	privateSubnet2      *ec2.Subnet
-	internetGateway     *ec2.InternetGateway
-	s3VpcEndpoint       *ec2.VpcEndpoint
-	publicRouteTable    *ec2.RouteTable
-	privateRouteTable   *ec2.RouteTable
-	ec2SecurityGroup    *ec2.SecurityGroup
-	auroraSecurityGroup *ec2.SecurityGroup
+// NetworkResources holds all the networking resources
+type NetworkResources struct {
+	Vpc                 *ec2.Vpc
+	PublicSubnet        *ec2.Subnet
+	PrivateSubnet1      *ec2.Subnet
+	PrivateSubnet2      *ec2.Subnet
+	InternetGateway     *ec2.InternetGateway
+	S3VpcEndpoint       *ec2.VpcEndpoint
+	DynamoDBVpcEndpoint *ec2.VpcEndpoint
+	PublicRouteTable    *ec2.RouteTable
+	PrivateRouteTable   *ec2.RouteTable
 }
 
-// createVpcResources creates all VPC and networking components
-func createVpcResources(ctx *pulumi.Context) (*VpcResources, error) {
+// createNetworkResources creates all VPC and networking components
+func createNetworkResources(ctx *pulumi.Context) (*NetworkResources, error) {
 	// Create VPC
 	vpc, err := ec2.NewVpc(ctx, "aurora-vpc", &ec2.VpcArgs{
 		CidrBlock: pulumi.String("10.0.0.0/16"),
@@ -82,14 +81,28 @@ func createVpcResources(ctx *pulumi.Context) (*VpcResources, error) {
 		return nil, err
 	}
 
-	// Create S3 VPC Endpoint
+	// Create S3 VPC Endpoint for private subnets only
 	s3VpcEndpoint, err := ec2.NewVpcEndpoint(ctx, "s3-vpc-endpoint", &ec2.VpcEndpointArgs{
 		VpcId:           vpc.ID(),
 		ServiceName:     pulumi.String("com.amazonaws.ap-southeast-1.s3"),
 		VpcEndpointType: pulumi.String("Gateway"),
-		RouteTableIds:   pulumi.StringArray{}, // We'll associate it with route tables later
+		RouteTableIds:   pulumi.StringArray{}, // We'll associate it with private route table later
 		Tags: pulumi.StringMap{
 			"Name": pulumi.String("aurora-s3-vpc-endpoint"),
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Create DynamoDB VPC Endpoint for private subnets
+	dynamoDBVpcEndpoint, err := ec2.NewVpcEndpoint(ctx, "dynamodb-vpc-endpoint", &ec2.VpcEndpointArgs{
+		VpcId:           vpc.ID(),
+		ServiceName:     pulumi.String("com.amazonaws.ap-southeast-1.dynamodb"),
+		VpcEndpointType: pulumi.String("Gateway"),
+		RouteTableIds:   pulumi.StringArray{}, // We'll associate it with private route table later
+		Tags: pulumi.StringMap{
+			"Name": pulumi.String("aurora-dynamodb-vpc-endpoint"),
 		},
 	})
 	if err != nil {
@@ -151,15 +164,7 @@ func createVpcResources(ctx *pulumi.Context) (*VpcResources, error) {
 		return nil, err
 	}
 
-	// Associate S3 VPC Endpoint with route tables
-	_, err = ec2.NewVpcEndpointRouteTableAssociation(ctx, "s3-endpoint-public-rt", &ec2.VpcEndpointRouteTableAssociationArgs{
-		RouteTableId:  publicRouteTable.ID(),
-		VpcEndpointId: s3VpcEndpoint.ID(),
-	})
-	if err != nil {
-		return nil, err
-	}
-
+	// Associate S3 VPC Endpoint with private route table only
 	_, err = ec2.NewVpcEndpointRouteTableAssociation(ctx, "s3-endpoint-private-rt", &ec2.VpcEndpointRouteTableAssociationArgs{
 		RouteTableId:  privateRouteTable.ID(),
 		VpcEndpointId: s3VpcEndpoint.ID(),
@@ -168,76 +173,24 @@ func createVpcResources(ctx *pulumi.Context) (*VpcResources, error) {
 		return nil, err
 	}
 
-	// Create EC2 security group
-	ec2SecurityGroup, err := ec2.NewSecurityGroup(ctx, "ec2-sg", &ec2.SecurityGroupArgs{
-		VpcId:       vpc.ID(),
-		Description: pulumi.String("Security group for EC2 instance"),
-		Ingress: ec2.SecurityGroupIngressArray{
-			&ec2.SecurityGroupIngressArgs{
-				Protocol:    pulumi.String("tcp"),
-				FromPort:    pulumi.Int(22),
-				ToPort:      pulumi.Int(22),
-				CidrBlocks:  pulumi.StringArray{pulumi.String("0.0.0.0/0")},
-				Description: pulumi.String("Allow SSH from anywhere"),
-			},
-		},
-		Egress: ec2.SecurityGroupEgressArray{
-			&ec2.SecurityGroupEgressArgs{
-				Protocol:    pulumi.String("-1"),
-				FromPort:    pulumi.Int(0),
-				ToPort:      pulumi.Int(0),
-				CidrBlocks:  pulumi.StringArray{pulumi.String("0.0.0.0/0")},
-				Description: pulumi.String("Allow all outbound traffic"),
-			},
-		},
-		Tags: pulumi.StringMap{
-			"Name": pulumi.String("aurora-ec2-sg"),
-		},
+	// Associate DynamoDB VPC Endpoint with private route table only
+	_, err = ec2.NewVpcEndpointRouteTableAssociation(ctx, "dynamodb-endpoint-private-rt", &ec2.VpcEndpointRouteTableAssociationArgs{
+		RouteTableId:  privateRouteTable.ID(),
+		VpcEndpointId: dynamoDBVpcEndpoint.ID(),
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	// Create Aurora security group
-	auroraSecurityGroup, err := ec2.NewSecurityGroup(ctx, "aurora-sg", &ec2.SecurityGroupArgs{
-		VpcId:       vpc.ID(),
-		Description: pulumi.String("Security group for Aurora MySQL cluster"),
-		Ingress: ec2.SecurityGroupIngressArray{
-			&ec2.SecurityGroupIngressArgs{
-				Protocol:       pulumi.String("tcp"),
-				FromPort:       pulumi.Int(3306),
-				ToPort:         pulumi.Int(3306),
-				SecurityGroups: pulumi.StringArray{ec2SecurityGroup.ID()},
-				Description:    pulumi.String("Allow MySQL from EC2 instance"),
-			},
-		},
-		Egress: ec2.SecurityGroupEgressArray{
-			&ec2.SecurityGroupEgressArgs{
-				Protocol:    pulumi.String("-1"),
-				FromPort:    pulumi.Int(0),
-				ToPort:      pulumi.Int(0),
-				CidrBlocks:  pulumi.StringArray{pulumi.String("0.0.0.0/0")},
-				Description: pulumi.String("Allow all outbound traffic"),
-			},
-		},
-		Tags: pulumi.StringMap{
-			"Name": pulumi.String("aurora-db-sg"),
-		},
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return &VpcResources{
-		vpc:                 vpc,
-		publicSubnet:        publicSubnet,
-		privateSubnet1:      privateSubnet1,
-		privateSubnet2:      privateSubnet2,
-		internetGateway:     igw,
-		s3VpcEndpoint:       s3VpcEndpoint,
-		publicRouteTable:    publicRouteTable,
-		privateRouteTable:   privateRouteTable,
-		ec2SecurityGroup:    ec2SecurityGroup,
-		auroraSecurityGroup: auroraSecurityGroup,
+	return &NetworkResources{
+		Vpc:                 vpc,
+		PublicSubnet:        publicSubnet,
+		PrivateSubnet1:      privateSubnet1,
+		PrivateSubnet2:      privateSubnet2,
+		InternetGateway:     igw,
+		S3VpcEndpoint:       s3VpcEndpoint,
+		DynamoDBVpcEndpoint: dynamoDBVpcEndpoint,
+		PublicRouteTable:    publicRouteTable,
+		PrivateRouteTable:   privateRouteTable,
 	}, nil
 }
