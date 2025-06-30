@@ -1,0 +1,5 @@
+config:
+  aws:region: ap-southeast-1  # Using Singapore region
+  aws:skipCredentialsValidation: "true"
+  aws:skipMetadataApiCheck: "false"  # Enable metadata API check to use EC2 instance role
+  aurora-audit-log-backup-lab:keyPairName: "keypair-sandbox0-sin-mymac.pem"  # EC2 key pair name
