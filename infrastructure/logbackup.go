@@ -1,6 +1,8 @@
 package main
 
 import (
+	"path/filepath"
+
 	"github.com/pulumi/pulumi-aws/sdk/v5/go/aws/cloudwatch"
 	"github.com/pulumi/pulumi-aws/sdk/v5/go/aws/dynamodb"
 	"github.com/pulumi/pulumi-aws/sdk/v5/go/aws/iam"
@@ -185,7 +187,7 @@ func createLogBackupInfrastructure(ctx *pulumi.Context) (*LogBackupResources, er
 	// Create DB Scanner Lambda function
 	dbScannerLambda, err := lambda.NewFunction(ctx, "aurora-db-scanner", &lambda.FunctionArgs{
 		Runtime:    pulumi.String("go1.x"),
-		Code:       pulumi.NewFileArchive("../build/dbscanner.zip"),
+		Code:       pulumi.NewFileArchive(filepath.Join("..", "build", "dbscanner")),
 		Handler:    pulumi.String("main"),
 		Role:       lambdaRole.Arn,
 		MemorySize: pulumi.Int(128),
@@ -206,7 +208,7 @@ func createLogBackupInfrastructure(ctx *pulumi.Context) (*LogBackupResources, er
 	// Create Log Detector Lambda function
 	logDetectorLambda, err := lambda.NewFunction(ctx, "aurora-log-detector", &lambda.FunctionArgs{
 		Runtime:    pulumi.String("go1.x"),
-		Code:       pulumi.NewFileArchive("../build/logdetector.zip"),
+		Code:       pulumi.NewFileArchive(filepath.Join("..", "build", "logdetector")),
 		Handler:    pulumi.String("main"),
 		Role:       lambdaRole.Arn,
 		MemorySize: pulumi.Int(256),
@@ -227,7 +229,7 @@ func createLogBackupInfrastructure(ctx *pulumi.Context) (*LogBackupResources, er
 	// Create Log Downloader Lambda function
 	logDownloaderLambda, err := lambda.NewFunction(ctx, "aurora-log-downloader", &lambda.FunctionArgs{
 		Runtime:    pulumi.String("go1.x"),
-		Code:       pulumi.NewFileArchive("../build/logdownloader.zip"),
+		Code:       pulumi.NewFileArchive(filepath.Join("..", "build", "logdownloader")),
 		Handler:    pulumi.String("main"),
 		Role:       lambdaRole.Arn,
 		MemorySize: pulumi.Int(512),
