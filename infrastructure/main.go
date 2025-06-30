@@ -36,6 +36,12 @@ func main() {
 			return err
 		}
 
+		// Create Log Backup infrastructure
+		logBackupResources, err := createLogBackupInfrastructure(ctx)
+		if err != nil {
+			return err
+		}
+
 		// Export outputs
 		ctx.Export("vpcId", vpcResources.vpc.ID())
 		ctx.Export("publicSubnetId", vpcResources.publicSubnet.ID())
@@ -44,6 +50,11 @@ func main() {
 		ctx.Export("ec2SecurityGroupId", vpcResources.ec2SecurityGroup.ID())
 		ctx.Export("auroraSecurityGroupId", vpcResources.auroraSecurityGroup.ID())
 		ctx.Export("s3BucketName", s3Resources.bucket.ID())
+
+		// Export Log Backup resources
+		ctx.Export("logBackupBucketName", logBackupResources.LogBucket.ID())
+		ctx.Export("logBackupDynamoTableName", logBackupResources.DynamoDBTable.Name)
+		ctx.Export("logBackupSQSQueueUrl", logBackupResources.SQSQueue.Url)
 
 		return nil
 	})
