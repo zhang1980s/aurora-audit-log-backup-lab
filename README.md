@@ -14,13 +14,14 @@ The project is organized into three main components:
 
 ```mermaid
 graph TD
-    %% Theme settings
-    classDef default fill:#333,stroke:#666,color:#fff
-    classDef awsService fill:#232F3E,stroke:#666,color:#fff
-    classDef vpc fill:#444,stroke:#666,color:#fff,stroke-width:2px
-    classDef subnet fill:#555,stroke:#666,color:#fff
-    classDef lambda fill:#333,stroke:#666,color:#fff
-    classDef endpoint fill:#444,stroke:#666,color:#fff
+    %% Theme settings - Light theme
+    classDef default fill:#fff,stroke:#333,color:#333
+    classDef awsService fill:#FF9900,stroke:#333,color:#333
+    classDef vpc fill:#E8F4FA,stroke:#333,color:#333,stroke-width:2px
+    classDef subnet fill:#F5F5F5,stroke:#333,color:#333
+    classDef lambda fill:#66CC00,stroke:#333,color:#333
+    classDef endpoint fill:#E8E8E8,stroke:#333,color:#333
+    classDef database fill:#3B48CC,stroke:#333,color:#fff
     
     %% AWS Services section
     subgraph awsServices["AWS Services"]
@@ -33,20 +34,21 @@ graph TD
     
     %% VPC section
     subgraph vpc["VPC"]
-        %% Private Subnets
+        %% VPC Endpoints - Vertical arrangement on the left
+        subgraph vpcEndpoints["VPC Endpoints"]
+            direction TB
+            S3Endpoint["S3 VPC Endpoint"]
+            DynamoDBEndpoint["DynamoDB VPC Endpoint"]
+            RDSEndpoint["RDS VPC Endpoint"]
+            SQSEndpoint["SQS VPC Endpoint"]
+        end
+        
+        %% Private Subnets with Aurora inside
         subgraph privateSubnets["Private Subnets"]
             DBScanner["DB Scanner Lambda\nwith versioning"]
             LogDetector["Log Detector Lambda\nwith versioning"]
             LogDownloader["Log Downloader Lambda\nwith versioning"]
             Aurora["Aurora MySQL\nwith Audit Logging"]
-        end
-        
-        %% VPC Endpoints
-        subgraph vpcEndpoints["VPC Endpoints"]
-            S3Endpoint["S3 VPC Endpoint"]
-            DynamoDBEndpoint["DynamoDB VPC Endpoint"]
-            RDSEndpoint["RDS VPC Endpoint"]
-            SQSEndpoint["SQS VPC Endpoint"]
         end
     end
     
@@ -67,14 +69,10 @@ graph TD
     LogDownloader -- "Uploads logs" --> S3Bucket
     
     %% VPC Endpoint connections
-    LogDetector -- "Uses" --> S3Endpoint
-    LogDetector -- "Uses" --> DynamoDBEndpoint
-    LogDetector -- "Uses" --> RDSEndpoint
-    LogDetector -- "Uses" --> SQSEndpoint
-    
-    LogDownloader -- "Uses" --> S3Endpoint
-    LogDownloader -- "Uses" --> DynamoDBEndpoint
-    LogDownloader -- "Uses" --> RDSEndpoint
+    S3Endpoint -- "Connects" --> S3Bucket
+    DynamoDBEndpoint -- "Connects" --> DynamoDB
+    RDSEndpoint -- "Connects" --> Aurora
+    SQSEndpoint -- "Connects" --> SQS
     
     %% Apply classes
     class awsServices awsService
@@ -82,6 +80,7 @@ graph TD
     class privateSubnets subnet
     class vpcEndpoints endpoint
     class DBScanner,LogDetector,LogDownloader lambda
+    class Aurora database
 ```
 
 ![Aurora Audit Log Backup Architecture](generated-diagrams/aurora-audit-log-backup-architecture.png)
