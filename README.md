@@ -1,313 +1,139 @@
 # Aurora Audit Log Backup Lab
 
-This lab provides a production-like environment for testing Aurora MySQL audit log backup solutions. It uses Pulumi with Go to create the necessary AWS infrastructure.
+This project demonstrates an automated solution for backing up Aurora MySQL audit logs to S3 using serverless components.
 
 ## Architecture
 
-The lab consists of the following components:
+The project is organized into three main components:
 
-- VPC with 1 public subnet and 2 private subnets in different availability zones
-- EC2 instance with Amazon Linux 2023 (ARM64) in the public subnet
-- Aurora MySQL cluster with 1 primary and 1 replica instance in the private subnets (Graviton-based)
-- S3 bucket for storing audit logs
-- IAM roles and policies for EC2 and Aurora
-- ARM64 compatible instance types (t4g.micro for EC2, t4g.medium for Aurora)
+1. **Fundamental Network Environment**: VPC, subnets, route tables, and VPC endpoints
+2. **Log Backup Resources**: Lambda functions, DynamoDB table, SQS queue, and S3 bucket for log backups
+3. **Aurora Test Environment**: Aurora MySQL cluster with audit logging enabled and EC2 instance for testing
 
 ## Project Structure
 
-```
-aurora-audit-log-backup-lab/
-├── infrastructure/           # Pulumi infrastructure code
-│   ├── Pulumi.yaml           # Project configuration
-│   ├── Pulumi.dev.yaml       # Stack configuration
-│   ├── go.mod                # Go module definition
-│   ├── main.go               # Main Pulumi program
-│   ├── vpc.go                # VPC, subnets, and networking components
-│   ├── ec2.go                # EC2 instance and related resources
-│   ├── aurora.go             # Aurora MySQL cluster configuration
-│   ├── iam.go                # IAM roles and policies
-│   └── s3.go                 # S3 bucket for audit logs
-├── scripts/
-│   ├── setup_ec2.sh          # EC2 instance setup script
-│   ├── setup_sysbench.sh     # Sysbench installation and configuration
-│   └── test_audit_logs.sh    # Script to verify audit logs
-└── README.md                 # Lab documentation
-```
+The infrastructure code is organized into two separate Pulumi stacks to solve the circular dependency between ECR repositories and Lambda functions:
+
+- `infrastructure/ecr-stack`: Manages only the ECR repositories
+- `infrastructure/aurora-log-backup-lab-stack`: Manages all other resources and references the ECR repositories from the ECR stack
 
 ## Prerequisites
 
-- AWS account with appropriate permissions
-- AWS CLI configured with access credentials
+- AWS CLI configured with appropriate credentials
 - Pulumi CLI installed
-- Go 1.24 or later installed
-- MySQL client installed
+- Docker installed
+- Go 1.20 or later
 
-## Setup Instructions
+## Deployment Process
 
-### 1. Initialize the Pulumi Project
+The deployment process is split into multiple steps to handle the circular dependency between ECR repositories and Lambda functions:
 
-```bash
-# Navigate to the infrastructure directory
-cd infrastructure
+### Step 1: Deploy ECR Repositories
 
-# Initialize the Go module
-go mod tidy
-
-# Login to Pulumi
-pulumi login
-```
-
-### 2. Configure AWS Authentication
-
-#### Option 1: Use EC2 Instance Role (Recommended)
-
-If you're running on an EC2 instance with an appropriate IAM role attached, Pulumi can automatically use these credentials:
+First, deploy the ECR stack to create the repositories:
 
 ```bash
-# Enable EC2 instance role authentication
-pulumi config set aws:skipCredentialsValidation true
-pulumi config set aws:skipMetadataApiCheck false
-```
-
-#### Option 2: Configure AWS Credentials Manually
-
-If you're not running on an EC2 instance or need to use different credentials:
-
-```bash
-# Configure AWS credentials
-aws configure
-# OR
-export AWS_ACCESS_KEY_ID=your_access_key
-export AWS_SECRET_ACCESS_KEY=your_secret_key
-export AWS_REGION=your_region
-```
-
-### 3. Configure AWS Region
-
-```bash
-# Set the AWS region
-pulumi config set aws:region us-east-1  # Change to your preferred region
-```
-
-### 4. Deploy the Infrastructure
-
-```bash
-# Deploy the infrastructure
+cd infrastructure/ecr-stack
+pulumi stack init dev
 pulumi up
 ```
 
-This will create all the necessary resources in your AWS account. The deployment will take approximately 15-20 minutes to complete.
+### Step 2: Build and Push Lambda Images
 
-### 5. Connect to the EC2 Instance
-
-```bash
-# Get the EC2 instance public IP
-EC2_IP=$(pulumi stack output ec2PublicIp)
-
-# Connect to the EC2 instance
-ssh -i /path/to/your/key.pem ec2-user@$EC2_IP
-```
-
-### 6. Set Up the Test Environment
+Build the Lambda container images and push them to the ECR repositories:
 
 ```bash
-# Run the EC2 setup script
-bash /home/ec2-user/scripts/setup_ec2.sh
+# Build the Lambda container images
+make build
 
-# Run the sysbench setup script
-bash /home/ec2-user/scripts/setup_sysbench.sh
+# Get ECR repository URLs and push images
+make push-images
 ```
 
-## Running Tests
+Alternatively, you can use the combined command:
+```bash
+make build-and-push
+```
 
-To run the tests and verify the audit logs:
+### Step 3: Deploy Main Infrastructure
+
+Deploy the Aurora stack which references the existing ECR repositories:
 
 ```bash
-# Run the test script
-bash /home/ec2-user/scripts/test_audit_logs.sh
+cd infrastructure/aurora-log-backup-lab-stack
+pulumi stack init dev
+pulumi up
 ```
 
-This script will:
-1. Run authentication tests
-2. Run OLTP workload tests
-3. Run schema modification tests
-4. Run privilege tests
-5. Download and analyze the audit logs from S3
-6. Generate a verification report
+## Testing the Solution
 
-## Audit Log Configuration
+After deployment, you can connect to the EC2 instance and run the provided test scripts:
 
-The Aurora MySQL cluster is configured with the following audit log settings:
+1. SSH into the EC2 instance using the public IP output from the deployment:
+   ```bash
+   ssh -i your-key.pem ec2-user@<ec2-public-ip>
+   ```
 
-- `server_audit_events = 'CONNECT,QUERY,TABLE,QUERY_DDL,QUERY_DML,QUERY_DCL'`
-- `server_audit_logging = 1`
-- `server_audit_logs_upload = 1`
-- `server_audit_s3_bucket_name = <your-s3-bucket-name>`
-- `server_audit_s3_file_prefix = 'audit-logs'`
+2. Set up the test database:
+   ```bash
+   cd ~/scripts
+   ./setup_sysbench.sh
+   ```
 
-This configuration captures all database activities including:
-- Connection attempts (CONNECT)
-- All queries (QUERY)
-- Table access (TABLE)
-- Data Definition Language operations (QUERY_DDL)
-- Data Manipulation Language operations (QUERY_DML)
-- Data Control Language operations (QUERY_DCL)
+3. Run the audit log tests:
+   ```bash
+   ./test_audit_logs.sh
+   ```
 
 ## Cleanup
 
-To avoid unnecessary costs, clean up the resources when you're done:
+To destroy all resources:
 
 ```bash
-# Navigate to the infrastructure directory
-cd infrastructure
+# Destroy the Aurora stack first
+cd infrastructure/aurora-log-backup-lab-stack
+pulumi destroy
 
-# Destroy all resources
+# Then destroy the ECR stack
+cd ../ecr-stack
 pulumi destroy
 ```
 
-## Troubleshooting
+## Configuration
 
-### Audit Logs Not Appearing in S3
+Configuration values are stored in the Pulumi stack configuration files:
 
-If audit logs are not appearing in the S3 bucket:
+- `infrastructure/ecr-stack/Pulumi.dev.yaml`
+- `infrastructure/aurora-log-backup-lab-stack/Pulumi.dev.yaml`
 
-1. Check the Aurora parameter group to ensure audit logging is enabled
-2. Verify that the Aurora cluster has the necessary IAM permissions to write to S3
-3. Check the CloudWatch Logs for any error messages
-4. Restart the Aurora cluster if necessary
+You can modify these files to customize the deployment.
 
-### Connection Issues
+## Components
 
-If you're having trouble connecting to the Aurora cluster:
+### Lambda Functions
 
-1. Verify that the EC2 instance is in the correct VPC and security group
-2. Check the security group rules to ensure port 3306 is open
-3. Verify that IAM authentication is properly configured
-4. Check the Aurora cluster status to ensure it's available
+1. **DB Scanner**: Scans for Aurora DB instances and sends their IDs to an SQS queue
+2. **Log Detector**: Processes DB instance IDs from the queue and detects new audit log files
+3. **Log Downloader**: Triggered by DynamoDB streams to download detected log files to S3
 
-## Additional Resources
+### Infrastructure Resources
 
-- [Aurora MySQL Documentation](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/CHAP_AuroraMySQL.html)
-- [Aurora Audit Logging](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/AuroraMySQL.Auditing.html)
-- [IAM Database Authentication](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/UsingWithRDS.IAMDBAuth.html)
-- [Sysbench Documentation](https://github.com/akopytov/sysbench)
+- VPC with public and private subnets
+- S3 VPC Endpoint (accessible only from private subnets)
+- DynamoDB VPC Endpoint (accessible only from private subnets)
+- Aurora MySQL cluster with audit logging enabled
+- EC2 instance for testing
+- S3 bucket for audit log backups
+- DynamoDB table for tracking log files
+- SQS queue for DB instance IDs
+- EventBridge rule for scheduling the DB Scanner Lambda
 
-## Aurora Audit Log Backup Architecture
+## Makefile Commands
 
-This section describes the architecture for an automated Aurora MySQL audit log backup solution using EventBridge, Lambda, SQS, DynamoDB, and S3.
+The Makefile provides the following commands for managing Lambda container images:
 
-### Architecture Overview
-
-The solution uses a serverless approach to automatically backup Aurora MySQL audit logs to S3. It efficiently tracks which logs have been backed up and only processes new or changed logs.
-
-```mermaid
-graph TD
-    EB[EventBridge Scheduler] -->|Triggers| L1[Lambda 1: DB Instance Scanner]
-    L1 -->|Sends DB Instance IDs| SQS[SQS Queue]
-    SQS -->|Triggers| L2[Lambda 2: Log File Detector]
-    L2 -->|Calls| RDS[RDS API: describeDBLogFiles]
-    L2 -->|Creates/Updates Records| DDB[DynamoDB Table]
-    DDB -->|Streams Changes| DDBStream[DynamoDB Stream]
-    DDBStream -->|Triggers| L3[Lambda 3: Log File Downloader]
-    L3 -->|Calls| RDS2[RDS API: downloadDBLogFilePortion]
-    L3 -->|Uploads| S3[S3 Bucket]
-    L3 -->|Updates lastBackup| DDB
-    Aurora[Aurora MySQL Cluster] -->|Generates| Logs[Audit Logs]
-    RDS -.->|Reads Metadata| Logs
-    RDS2 -.->|Downloads| Logs
-```
-
-### Component Details
-
-#### 1. EventBridge Scheduler
-- Scheduled rule to trigger Lambda 1 periodically (e.g., every 15 minutes)
-- Ensures regular scanning of DB instances
-
-#### 2. Lambda 1: DB Instance Scanner
-- **Input**: None (triggered by EventBridge)
-- **Process**:
-  - Calls `DescribeDBInstances` API to get all Aurora MySQL instances
-  - Filters for instances with audit logging enabled
-  - Sends each DBInstanceIdentifier to SQS
-- **Output**: DBInstanceIdentifiers to SQS queue
-
-#### 3. SQS Queue
-- Decouples the DB instance discovery from log file processing
-- Provides buffering if many DB instances are discovered
-- Enables automatic retries if Lambda 2 fails
-
-#### 4. Lambda 2: Log File Detector
-- **Input**: DBInstanceIdentifier from SQS
-- **Process**:
-  - Calls `DescribeDBLogFiles` API to get log files for the instance
-  - For each log file, checks if it exists in DynamoDB
-  - If not exists: Creates new record
-  - If exists but changed: Updates record
-- **Output**: Creates/updates records in DynamoDB
-
-#### 5. DynamoDB Table
-- **Primary Key**: Composite key of DBInstanceIdentifier (Partition) and LogFileName (Sort)
-- **Attributes**:
-  - DBInstanceIdentifier (String)
-  - LogFileName (String)
-  - Size (Number)
-  - LastWritten (Number)
-  - LastBackup (Number, nullable)
-- **Stream**: Enabled for inserts and updates
-
-#### 6. Lambda 3: Log File Downloader
-- **Input**: DynamoDB stream events (new or updated records)
-- **Process**:
-  - Calls `DownloadDBLogFilePortion` API to download log files
-  - Uploads log files to S3
-  - Updates LastBackup timestamp in DynamoDB
-- **Output**: Log files in S3, updated DynamoDB records
-
-#### 7. S3 Bucket
-- Destination for log backups
-- Organized by: `/logs/{db-instance-id}/{log-file-name}`
-- Lifecycle policies can be applied for cost optimization
-
-### IAM Permissions
-
-Each Lambda function will need specific IAM permissions:
-
-#### Lambda 1 (DB Scanner)
-- `rds:DescribeDBInstances`
-- `sqs:SendMessage`
-
-#### Lambda 2 (Log Detector)
-- `rds:DescribeDBLogFiles`
-- `dynamodb:PutItem`
-- `dynamodb:GetItem`
-- `dynamodb:UpdateItem`
-- `sqs:ReceiveMessage`
-- `sqs:DeleteMessage`
-
-#### Lambda 3 (Log Downloader)
-- `rds:DownloadDBLogFilePortion`
-- `s3:PutObject`
-- `dynamodb:UpdateItem`
-- `dynamodb:GetItem`
-
-### Considerations and Optimizations
-
-#### Error Handling
-- Implement retry mechanisms for API failures
-- Use DLQ (Dead Letter Queue) for SQS
-- Log errors to CloudWatch Logs
-
-#### Performance
-- Use pagination for large result sets
-- Optimize Lambda memory allocation
-- Consider batching S3 uploads for large log files
-
-#### Cost Optimization
-- Adjust EventBridge schedule based on log generation frequency
-- Set appropriate SQS message retention
-- Configure S3 lifecycle policies for log retention
-
-#### Security
-- Encrypt data at rest (S3, DynamoDB)
-- Use least privilege IAM permissions
-- Consider VPC for Lambda functions if needed
+- `make build`: Build the Lambda container images
+- `make get-ecr-urls`: Get the ECR repository URLs from the ECR stack
+- `make push-images`: Push the Lambda container images to ECR
+- `make build-and-push`: Build and push the Lambda container images in one step
+- `make clean`: Clean up Docker images

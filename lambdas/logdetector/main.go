@@ -14,6 +14,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/aws/aws-sdk-go-v2/service/rds"
+	rdstypes "github.com/aws/aws-sdk-go-v2/service/rds/types"
 )
 
 // LogFileRecord represents a record in the DynamoDB table
@@ -67,20 +68,20 @@ func Handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 		// Process each log file
 		for _, logFile := range logFiles {
 			// Check if the log file is an audit log
-			if !isAuditLog(logFile.LogFileName) {
+			if logFile.LogFileName == nil || !isAuditLog(*logFile.LogFileName) {
 				continue
 			}
 
 			// Create a record for the log file
 			record := LogFileRecord{
 				DBInstanceIdentifier: dbInstanceID,
-				LogFileName:          logFile.LogFileName,
+				LogFileName:          *logFile.LogFileName,
 				Size:                 logFile.Size,
 				LastWritten:          logFile.LastWritten,
 			}
 
 			// Check if the record already exists in DynamoDB
-			existingRecord, err := getLogFileRecord(ctx, dynamoClient, tableName, dbInstanceID, logFile.LogFileName, logger)
+			existingRecord, err := getLogFileRecord(ctx, dynamoClient, tableName, dbInstanceID, *logFile.LogFileName, logger)
 			if err != nil {
 				logger.Printf("Error checking for existing record: %v\n", err)
 				continue
@@ -103,7 +104,7 @@ func Handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 				}
 			} else {
 				// Record exists and hasn't changed, skip it
-				logger.Printf("Log file %s hasn't changed, skipping\n", logFile.LogFileName)
+				logger.Printf("Log file %s hasn't changed, skipping\n", record.LogFileName)
 			}
 		}
 	}
@@ -112,10 +113,10 @@ func Handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 }
 
 // getDBLogFiles gets all log files for a DB instance
-func getDBLogFiles(ctx context.Context, client *rds.Client, dbInstanceID string, logger *log.Logger) ([]rds.DescribeDBLogFilesDetails, error) {
+func getDBLogFiles(ctx context.Context, client *rds.Client, dbInstanceID string, logger *log.Logger) ([]rdstypes.DescribeDBLogFilesDetails, error) {
 	logger.Printf("Getting log files for DB instance %s\n", dbInstanceID)
 
-	var logFiles []rds.DescribeDBLogFilesDetails
+	var logFiles []rdstypes.DescribeDBLogFilesDetails
 	var marker *string
 
 	// Use pagination to get all log files

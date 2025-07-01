@@ -1,12 +1,12 @@
 module github.com/zhang1980s/aurora-audit-log-backup-lab/lambdas/dbscanner
 
-go 1.20
+go 1.24.4
 
 require (
 	github.com/aws/aws-lambda-go v1.41.0
 	github.com/aws/aws-sdk-go-v2 v1.24.0
 	github.com/aws/aws-sdk-go-v2/config v1.26.1
-	github.com/aws/aws-sdk-go-v2/service/rds v1.57.1
+	github.com/aws/aws-sdk-go-v2/service/rds v1.57.0
 	github.com/aws/aws-sdk-go-v2/service/sqs v1.29.5
 )
 

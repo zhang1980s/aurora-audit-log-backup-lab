@@ -74,7 +74,7 @@ func Handler(ctx context.Context, event events.DynamoDBEvent) error {
 
 		// Parse the DynamoDB record
 		var logFileRecord LogFileRecord
-		err := attributevalue.UnmarshalMap(record.Change.NewImage, &logFileRecord)
+		err := unmarshalDynamoDBEvent(record.Change.NewImage, &logFileRecord)
 		if err != nil {
 			logger.Printf("Error unmarshalling DynamoDB record: %v\n", err)
 			continue
@@ -114,20 +114,122 @@ func Handler(ctx context.Context, event events.DynamoDBEvent) error {
 	return nil
 }
 
+// unmarshalDynamoDBEvent unmarshals a DynamoDB event record into a struct
+func unmarshalDynamoDBEvent(image map[string]events.DynamoDBAttributeValue, out interface{}) error {
+	// Convert events.DynamoDBAttributeValue to map[string]interface{}
+	item := make(map[string]interface{})
+
+	for k, v := range image {
+		switch v.DataType() {
+		case events.DataTypeString:
+			item[k] = v.String()
+		case events.DataTypeNumber:
+			item[k] = v.Number()
+		case events.DataTypeBinary:
+			item[k] = v.Binary()
+		case events.DataTypeBoolean:
+			item[k] = v.Boolean()
+		case events.DataTypeNull:
+			item[k] = nil
+		case events.DataTypeList:
+			list := make([]interface{}, len(v.List()))
+			for i, lv := range v.List() {
+				var err error
+				list[i], err = convertDynamoDBAttributeValue(lv)
+				if err != nil {
+					return err
+				}
+			}
+			item[k] = list
+		case events.DataTypeMap:
+			m := make(map[string]interface{})
+			for mk, mv := range v.Map() {
+				var err error
+				m[mk], err = convertDynamoDBAttributeValue(mv)
+				if err != nil {
+					return err
+				}
+			}
+			item[k] = m
+		default:
+			return fmt.Errorf("unsupported data type: %s", v.DataType())
+		}
+	}
+
+	// Use attributevalue to unmarshal the map into the struct
+	av, err := attributevalue.MarshalMap(item)
+	if err != nil {
+		return err
+	}
+
+	return attributevalue.UnmarshalMap(av, out)
+}
+
+// convertDynamoDBAttributeValue converts a DynamoDB attribute value to a Go type
+func convertDynamoDBAttributeValue(v events.DynamoDBAttributeValue) (interface{}, error) {
+	switch v.DataType() {
+	case events.DataTypeString:
+		return v.String(), nil
+	case events.DataTypeNumber:
+		return v.Number(), nil
+	case events.DataTypeBinary:
+		return v.Binary(), nil
+	case events.DataTypeBoolean:
+		return v.Boolean(), nil
+	case events.DataTypeNull:
+		return nil, nil
+	case events.DataTypeList:
+		list := make([]interface{}, len(v.List()))
+		for i, lv := range v.List() {
+			var err error
+			list[i], err = convertDynamoDBAttributeValue(lv)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return list, nil
+	case events.DataTypeMap:
+		m := make(map[string]interface{})
+		for mk, mv := range v.Map() {
+			var err error
+			m[mk], err = convertDynamoDBAttributeValue(mv)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return m, nil
+	default:
+		return nil, fmt.Errorf("unsupported data type: %s", v.DataType())
+	}
+}
+
 // shouldDownload determines if a log file should be downloaded based on changes
 func shouldDownload(oldImage, newImage map[string]events.DynamoDBAttributeValue, logger *log.Logger) bool {
 	// If Size or LastWritten has changed, download the log file
-	if oldImage["Size"].Number != newImage["Size"].Number || oldImage["LastWritten"].Number != newImage["LastWritten"].Number {
-		return true
+	if oldSize, ok := oldImage["Size"]; ok {
+		if newSize, ok := newImage["Size"]; ok {
+			if oldSize.Number() != newSize.Number() {
+				return true
+			}
+		}
+	}
+
+	if oldLastWritten, ok := oldImage["LastWritten"]; ok {
+		if newLastWritten, ok := newImage["LastWritten"]; ok {
+			if oldLastWritten.Number() != newLastWritten.Number() {
+				return true
+			}
+		}
 	}
 
 	// If LastBackup doesn't exist or is older than 24 hours, download the log file
-	if _, exists := newImage["LastBackup"]; !exists {
+	lastBackup, exists := newImage["LastBackup"]
+	if !exists {
 		return true
 	}
 
-	lastBackupStr := newImage["LastBackup"].Number
-	lastBackup, err := strconv.ParseInt(lastBackupStr, 10, 64)
+	lastBackupStr := lastBackup.Number()
+	lastBackupVal, err := strconv.ParseInt(lastBackupStr, 10, 64)
 	if err != nil {
 		logger.Printf("Error parsing LastBackup: %v\n", err)
 		return true
@@ -135,7 +237,7 @@ func shouldDownload(oldImage, newImage map[string]events.DynamoDBAttributeValue,
 
 	// If LastBackup is older than 24 hours, download the log file
 	twentyFourHoursAgo := time.Now().Unix() - 24*60*60
-	return lastBackup < twentyFourHoursAgo
+	return lastBackupVal < twentyFourHoursAgo
 }
 
 // downloadLogFile downloads a log file from an Aurora DB instance

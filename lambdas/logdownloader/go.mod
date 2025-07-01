@@ -1,6 +1,6 @@
 module github.com/zhang1980s/aurora-audit-log-backup-lab/lambdas/logdownloader
 
-go 1.20
+go 1.24.4
 
 require (
 	github.com/aws/aws-lambda-go v1.41.0
@@ -8,7 +8,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.26.1
 	github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue v1.12.12
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.26.6
-	github.com/aws/aws-sdk-go-v2/service/rds v1.57.1
+	github.com/aws/aws-sdk-go-v2/service/rds v1.57.0
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.47.5
 )
 
@@ -20,6 +20,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.5.9 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/ini v1.7.2 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/v4a v1.2.9 // indirect
+	github.com/aws/aws-sdk-go-v2/service/dynamodbstreams v1.18.5 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.10.4 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/checksum v1.2.9 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/endpoint-discovery v1.8.10 // indirect

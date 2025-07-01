@@ -1,3 +1,0 @@
-name: aurora-audit-log-backup-lab
-runtime: go
-description: A lab environment for testing Aurora MySQL audit log backup solutions

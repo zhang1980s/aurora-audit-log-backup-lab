@@ -1,0 +1,3 @@
+name: aurora-ecr
+runtime: go
+description: ECR repositories for Aurora Audit Log Backup Lab
