@@ -14,14 +14,14 @@ The project is organized into three main components:
 
 ```mermaid
 graph TD
-    %% Theme settings - Light theme
-    classDef default fill:#fff,stroke:#333,color:#333
-    classDef awsService fill:#FF9900,stroke:#333,color:#333
-    classDef vpc fill:#E8F4FA,stroke:#333,color:#333,stroke-width:2px
-    classDef subnet fill:#F5F5F5,stroke:#333,color:#333
-    classDef lambda fill:#66CC00,stroke:#333,color:#333
-    classDef endpoint fill:#E8E8E8,stroke:#333,color:#333
-    classDef database fill:#3B48CC,stroke:#333,color:#fff
+    %% Theme settings - Dark theme with cool colors
+    classDef default fill:#2D3748,stroke:#4A5568,color:#E2E8F0
+    classDef awsService fill:#1A365D,stroke:#2C5282,color:#EBF8FF
+    classDef vpc fill:#2A4365,stroke:#2C5282,color:#EBF8FF,stroke-width:2px
+    classDef subnet fill:#2C5282,stroke:#4299E1,color:#EBF8FF
+    classDef lambda fill:#2B6CB0,stroke:#4299E1,color:#EBF8FF
+    classDef endpoint fill:#2C5282,stroke:#4299E1,color:#EBF8FF
+    classDef database fill:#3182CE,stroke:#4299E1,color:#EBF8FF
     
     %% AWS Services section
     subgraph awsServices["AWS Services"]
@@ -34,13 +34,19 @@ graph TD
     
     %% VPC section
     subgraph vpc["VPC"]
-        %% VPC Endpoints - Vertical arrangement on the left
+        %% VPC Endpoints - 2x2 grid arrangement
         subgraph vpcEndpoints["VPC Endpoints"]
             direction TB
-            S3Endpoint["S3 VPC Endpoint"]
-            DynamoDBEndpoint["DynamoDB VPC Endpoint"]
-            RDSEndpoint["RDS VPC Endpoint"]
-            SQSEndpoint["SQS VPC Endpoint"]
+            subgraph endpoints1[""]
+                direction LR
+                S3Endpoint["S3 VPC Endpoint"]
+                DynamoDBEndpoint["DynamoDB VPC Endpoint"]
+            end
+            subgraph endpoints2[""]
+                direction LR
+                RDSEndpoint["RDS VPC Endpoint"]
+                SQSEndpoint["SQS VPC Endpoint"]
+            end
         end
         
         %% Private Subnets with Aurora inside
@@ -81,6 +87,7 @@ graph TD
     class vpcEndpoints endpoint
     class DBScanner,LogDetector,LogDownloader lambda
     class Aurora database
+    class S3Endpoint,DynamoDBEndpoint,RDSEndpoint,SQSEndpoint endpoint
 ```
 
 ![Aurora Audit Log Backup Architecture](generated-diagrams/aurora-audit-log-backup-architecture.png)
