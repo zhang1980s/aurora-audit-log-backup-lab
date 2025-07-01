@@ -18,6 +18,7 @@ type NetworkResources struct {
 	S3VpcEndpoint       *ec2.VpcEndpoint
 	DynamoDBVpcEndpoint *ec2.VpcEndpoint
 	RDSVpcEndpoint      *ec2.VpcEndpoint
+	SQSVpcEndpoint      *ec2.VpcEndpoint
 	PublicRouteTable    *ec2.RouteTable
 	PrivateRouteTable   *ec2.RouteTable
 }
@@ -159,6 +160,22 @@ func createNetworkResources(ctx *pulumi.Context) (*NetworkResources, error) {
 		return nil, err
 	}
 
+	// Create SQS VPC Endpoint
+	sqsVpcEndpoint, err := ec2.NewVpcEndpoint(ctx, "sqs-vpc-endpoint", &ec2.VpcEndpointArgs{
+		VpcId:             vpc.ID(),
+		ServiceName:       pulumi.String(fmt.Sprintf("com.amazonaws.%s.sqs", region)),
+		VpcEndpointType:   pulumi.String("Interface"),
+		SubnetIds:         pulumi.StringArray{privateSubnet1.ID(), privateSubnet2.ID()},
+		SecurityGroupIds:  pulumi.StringArray{vpcEndpointSG.ID()},
+		PrivateDnsEnabled: pulumi.Bool(true),
+		Tags: pulumi.StringMap{
+			"Name": pulumi.String("aurora-sqs-vpc-endpoint"),
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	// Create public route table
 	publicRouteTable, err := ec2.NewRouteTable(ctx, "public-rt", &ec2.RouteTableArgs{
 		VpcId: vpc.ID(),
@@ -241,6 +258,7 @@ func createNetworkResources(ctx *pulumi.Context) (*NetworkResources, error) {
 		S3VpcEndpoint:       s3VpcEndpoint,
 		DynamoDBVpcEndpoint: dynamoDBVpcEndpoint,
 		RDSVpcEndpoint:      rdsVpcEndpoint,
+		SQSVpcEndpoint:      sqsVpcEndpoint,
 		PublicRouteTable:    publicRouteTable,
 		PrivateRouteTable:   privateRouteTable,
 	}, nil
