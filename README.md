@@ -10,6 +10,60 @@ The project is organized into three main components:
 2. **Log Backup Resources**: Lambda functions with versioning, DynamoDB table, SQS queue, and S3 bucket for log backups
 3. **Aurora Test Environment**: Aurora MySQL cluster with audit logging enabled and EC2 instance for testing
 
+### Architecture Diagram
+
+```mermaid
+flowchart TB
+    %% AWS Services outside VPC
+    EventBridge["EventBridge\nScheduled Rule"]
+    SQS["SQS Queue"]
+    DynamoDB["DynamoDB Table"]
+    S3["S3 Bucket"]
+    ECR["ECR Repositories"]
+    
+    %% VPC and Subnets
+    subgraph VPC["VPC"]
+        subgraph LambdaSubnet["Private Subnet - Lambda Functions"]
+            Scanner["DB Scanner Lambda"]
+            Detector["Log Detector Lambda"]
+            Downloader["Log Downloader Lambda"]
+        end
+        
+        subgraph DBSubnet["Private Subnet - Database"]
+            Aurora["Aurora MySQL\nwith Audit Logging"]
+        end
+    end
+    
+    %% Connections with numbered workflow
+    EventBridge -->|1. Schedule| Scanner
+    Scanner -->|2. DB IDs| SQS
+    SQS -->|3. Process| Detector
+    Detector -->|4. Query logs| Aurora
+    Detector -->|5. Store metadata| DynamoDB
+    DynamoDB -->|6. Stream events| Downloader
+    Downloader -->|7. Download logs| Aurora
+    Downloader -->|8. Upload logs| S3
+    Downloader -->|9. Update status| DynamoDB
+    
+    %% Container images
+    ECR -.->|Container images| Scanner
+    ECR -.->|Container images| Detector
+    ECR -.->|Container images| Downloader
+    
+    %% Styling
+    classDef aws fill:#FF9900,stroke:#232F3E,color:#232F3E
+    classDef lambda fill:#009900,stroke:#232F3E,color:white
+    classDef database fill:#3B48CC,stroke:#232F3E,color:white
+    classDef storage fill:#3B48CC,stroke:#232F3E,color:white
+    classDef subnet fill:#F5F5F5,stroke:#232F3E,color:#232F3E
+    
+    class EventBridge,SQS,DynamoDB,ECR aws
+    class Scanner,Detector,Downloader lambda
+    class Aurora database
+    class S3 storage
+    class LambdaSubnet,DBSubnet subnet
+```
+
 ![Aurora Audit Log Backup Architecture](generated-diagrams/aurora-audit-log-backup-architecture.png)
 
 ## Project Structure
