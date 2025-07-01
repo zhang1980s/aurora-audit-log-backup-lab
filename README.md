@@ -6,9 +6,11 @@ This project demonstrates an automated solution for backing up Aurora MySQL audi
 
 The project is organized into three main components:
 
-1. **Fundamental Network Environment**: VPC, subnets, route tables, and VPC endpoints
-2. **Log Backup Resources**: Lambda functions, DynamoDB table, SQS queue, and S3 bucket for log backups
+1. **Fundamental Network Environment**: VPC, subnets, route tables, and VPC endpoints for secure private access
+2. **Log Backup Resources**: Lambda functions with versioning, DynamoDB table, SQS queue, and S3 bucket for log backups
 3. **Aurora Test Environment**: Aurora MySQL cluster with audit logging enabled and EC2 instance for testing
+
+![Aurora Audit Log Backup Architecture](generated-diagrams/aurora-audit-log-backup-architecture-v3.png.png)
 
 ## Project Structure
 
@@ -40,20 +42,17 @@ pulumi up
 
 ### Step 2: Build and Push Lambda Images
 
-Build the Lambda container images and push them to the ECR repositories:
+Build and push the Lambda container images to the ECR repositories with versioning:
 
 ```bash
-# Build the Lambda container images
-make build
-
-# Get ECR repository URLs and push images
-make push-images
+# Build and push the Lambda container images with versioning
+make build-and-push-versioned VERSION=v1.0.0
 ```
 
-Alternatively, you can use the combined command:
-```bash
-make build-and-push
-```
+This will:
+- Build the Lambda container images with the specified version tag
+- Push the images to ECR
+- Update the Pulumi configuration with the new version
 
 ### Step 3: Deploy Main Infrastructure
 
@@ -108,6 +107,16 @@ Configuration values are stored in the Pulumi stack configuration files:
 
 You can modify these files to customize the deployment.
 
+## Lambda Versioning
+
+This project implements Lambda versioning and aliases for better deployment control and rollback capabilities. For detailed information, see [LAMBDA-VERSIONING.md](LAMBDA-VERSIONING.md).
+
+Key features:
+- Container image versioning with semantic versioning
+- Lambda function versioning with Pulumi
+- Lambda aliases that point to specific versions
+- Configuration-driven versioning in Pulumi.dev.yaml
+
 ## Components
 
 ### Lambda Functions
@@ -116,11 +125,15 @@ You can modify these files to customize the deployment.
 2. **Log Detector**: Processes DB instance IDs from the queue and detects new audit log files
 3. **Log Downloader**: Triggered by DynamoDB streams to download detected log files to S3
 
+All Lambda functions use container images with versioning and aliases for controlled deployments.
+
 ### Infrastructure Resources
 
 - VPC with public and private subnets
 - S3 VPC Endpoint (accessible only from private subnets)
 - DynamoDB VPC Endpoint (accessible only from private subnets)
+- RDS VPC Endpoint (accessible only from private subnets)
+- SQS VPC Endpoint (accessible only from private subnets)
 - Aurora MySQL cluster with audit logging enabled
 - EC2 instance for testing
 - S3 bucket for audit log backups
@@ -135,5 +148,6 @@ The Makefile provides the following commands for managing Lambda container image
 - `make build`: Build the Lambda container images
 - `make get-ecr-urls`: Get the ECR repository URLs from the ECR stack
 - `make push-images`: Push the Lambda container images to ECR
-- `make build-and-push`: Build and push the Lambda container images in one step
 - `make clean`: Clean up Docker images
+- `make update-pulumi-config`: Update Pulumi config with new image versions
+- `make build-and-push-versioned VERSION=v1.0.0`: Build and push images with a specific version tag and update Pulumi config
