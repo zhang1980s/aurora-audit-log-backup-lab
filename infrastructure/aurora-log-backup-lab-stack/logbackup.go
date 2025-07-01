@@ -16,14 +16,17 @@ import (
 
 // LogBackupResources holds all the resources for the log backup solution
 type LogBackupResources struct {
-	LogBucket           *s3.Bucket
-	DynamoDBTable       *dynamodb.Table
-	SQSQueue            *sqs.Queue
-	LambdaRole          *iam.Role
-	DBScannerLambda     *lambda.Function
-	LogDetectorLambda   *lambda.Function
-	LogDownloaderLambda *lambda.Function
-	EventBridgeRule     *cloudwatch.EventRule
+	LogBucket                *s3.Bucket
+	DynamoDBTable            *dynamodb.Table
+	SQSQueue                 *sqs.Queue
+	LambdaRole               *iam.Role
+	DBScannerLambda          *lambda.Function
+	DBScannerLambdaAlias     *lambda.Alias
+	LogDetectorLambda        *lambda.Function
+	LogDetectorLambdaAlias   *lambda.Alias
+	LogDownloaderLambda      *lambda.Function
+	LogDownloaderLambdaAlias *lambda.Alias
+	EventBridgeRule          *cloudwatch.EventRule
 }
 
 // createLogBackupResources creates all the resources for the log backup solution
@@ -66,6 +69,28 @@ func createLogBackupResources(ctx *pulumi.Context, networkResources *NetworkReso
 	lambdaBatchSize, err := strconv.Atoi(projectCfg.Require("lambdaBatchSize"))
 	if err != nil {
 		return nil, err
+	}
+
+	// Get image versions from config
+	dbScannerImageVersion := projectCfg.Get("dbScannerImageVersion")
+	if dbScannerImageVersion == "" {
+		dbScannerImageVersion = "latest" // Fallback to latest if not specified
+	}
+
+	logDetectorImageVersion := projectCfg.Get("logDetectorImageVersion")
+	if logDetectorImageVersion == "" {
+		logDetectorImageVersion = "latest"
+	}
+
+	logDownloaderImageVersion := projectCfg.Get("logDownloaderImageVersion")
+	if logDownloaderImageVersion == "" {
+		logDownloaderImageVersion = "latest"
+	}
+
+	// Check if we should publish Lambda versions
+	publishVersions := false
+	if publishVersionsStr := projectCfg.Get("publishLambdaVersions"); publishVersionsStr == "true" {
+		publishVersions = true
 	}
 
 	// Get ECR repository URLs from ECR stack
@@ -274,10 +299,12 @@ func createLogBackupResources(ctx *pulumi.Context, networkResources *NetworkReso
 	// Create DB Scanner Lambda function with container image
 	dbScannerLambda, err := lambda.NewFunction(ctx, "aurora-db-scanner", &lambda.FunctionArgs{
 		PackageType: pulumi.String("Image"),
-		ImageUri:    pulumi.Sprintf("%s:latest", dbScannerRepoUrl),
+		ImageUri:    pulumi.Sprintf("%s:%s", dbScannerRepoUrl, dbScannerImageVersion),
 		Role:        lambdaRole.Arn,
 		MemorySize:  pulumi.Int(dbScannerMemory),
 		Timeout:     pulumi.Int(dbScannerTimeout),
+		Publish:     pulumi.Bool(publishVersions),
+		Description: pulumi.Sprintf("Aurora DB Scanner Lambda - Version %s", dbScannerImageVersion),
 		Architectures: pulumi.StringArray{
 			pulumi.String("arm64"),
 		},
@@ -303,13 +330,26 @@ func createLogBackupResources(ctx *pulumi.Context, networkResources *NetworkReso
 		return nil, err
 	}
 
+	// Create an alias for the DB Scanner Lambda
+	dbScannerAlias, err := lambda.NewAlias(ctx, "aurora-db-scanner-alias", &lambda.AliasArgs{
+		FunctionName:    dbScannerLambda.Name,
+		FunctionVersion: pulumi.String("$LATEST"), // Use $LATEST or a specific version
+		Name:            pulumi.String("live"),
+		Description:     pulumi.String("Production alias for Aurora DB Scanner Lambda"),
+	}, pulumi.DependsOn([]pulumi.Resource{dbScannerLambda}))
+	if err != nil {
+		return nil, err
+	}
+
 	// Create Log Detector Lambda function with container image
 	logDetectorLambda, err := lambda.NewFunction(ctx, "aurora-log-detector", &lambda.FunctionArgs{
 		PackageType: pulumi.String("Image"),
-		ImageUri:    pulumi.Sprintf("%s:latest", logDetectorRepoUrl),
+		ImageUri:    pulumi.Sprintf("%s:%s", logDetectorRepoUrl, logDetectorImageVersion),
 		Role:        lambdaRole.Arn,
 		MemorySize:  pulumi.Int(logDetectorMemory),
 		Timeout:     pulumi.Int(logDetectorTimeout),
+		Publish:     pulumi.Bool(publishVersions),
+		Description: pulumi.Sprintf("Aurora Log Detector Lambda - Version %s", logDetectorImageVersion),
 		Architectures: pulumi.StringArray{
 			pulumi.String("arm64"),
 		},
@@ -335,13 +375,26 @@ func createLogBackupResources(ctx *pulumi.Context, networkResources *NetworkReso
 		return nil, err
 	}
 
+	// Create an alias for the Log Detector Lambda
+	logDetectorAlias, err := lambda.NewAlias(ctx, "aurora-log-detector-alias", &lambda.AliasArgs{
+		FunctionName:    logDetectorLambda.Name,
+		FunctionVersion: pulumi.String("$LATEST"), // Use $LATEST or a specific version
+		Name:            pulumi.String("live"),
+		Description:     pulumi.String("Production alias for Aurora Log Detector Lambda"),
+	}, pulumi.DependsOn([]pulumi.Resource{logDetectorLambda}))
+	if err != nil {
+		return nil, err
+	}
+
 	// Create Log Downloader Lambda function with container image
 	logDownloaderLambda, err := lambda.NewFunction(ctx, "aurora-log-downloader", &lambda.FunctionArgs{
 		PackageType: pulumi.String("Image"),
-		ImageUri:    pulumi.Sprintf("%s:latest", logDownloaderRepoUrl),
+		ImageUri:    pulumi.Sprintf("%s:%s", logDownloaderRepoUrl, logDownloaderImageVersion),
 		Role:        lambdaRole.Arn,
 		MemorySize:  pulumi.Int(logDownloaderMemory),
 		Timeout:     pulumi.Int(logDownloaderTimeout),
+		Publish:     pulumi.Bool(publishVersions),
+		Description: pulumi.Sprintf("Aurora Log Downloader Lambda - Version %s", logDownloaderImageVersion),
 		Architectures: pulumi.StringArray{
 			pulumi.String("arm64"),
 		},
@@ -369,6 +422,17 @@ func createLogBackupResources(ctx *pulumi.Context, networkResources *NetworkReso
 		return nil, err
 	}
 
+	// Create an alias for the Log Downloader Lambda
+	logDownloaderAlias, err := lambda.NewAlias(ctx, "aurora-log-downloader-alias", &lambda.AliasArgs{
+		FunctionName:    logDownloaderLambda.Name,
+		FunctionVersion: pulumi.String("$LATEST"), // Use $LATEST or a specific version
+		Name:            pulumi.String("live"),
+		Description:     pulumi.String("Production alias for Aurora Log Downloader Lambda"),
+	}, pulumi.DependsOn([]pulumi.Resource{logDownloaderLambda}))
+	if err != nil {
+		return nil, err
+	}
+
 	// Create EventBridge rule to trigger DB Scanner Lambda
 	eventRule, err := cloudwatch.NewEventRule(ctx, "aurora-db-scanner-schedule", &cloudwatch.EventRuleArgs{
 		ScheduleExpression: pulumi.String(eventBridgeSchedule),
@@ -381,43 +445,44 @@ func createLogBackupResources(ctx *pulumi.Context, networkResources *NetworkReso
 		return nil, err
 	}
 
-	// Add EventBridge target for DB Scanner Lambda
+	// Add EventBridge target for DB Scanner Lambda (using alias)
 	_, err = cloudwatch.NewEventTarget(ctx, "aurora-db-scanner-target", &cloudwatch.EventTargetArgs{
 		Rule: eventRule.Name,
-		Arn:  dbScannerLambda.Arn,
-	}, pulumi.DependsOn([]pulumi.Resource{dbScannerLambda}))
+		Arn:  dbScannerAlias.Arn, // Use alias ARN instead of function ARN
+	}, pulumi.DependsOn([]pulumi.Resource{dbScannerAlias}))
 	if err != nil {
 		return nil, err
 	}
 
-	// Allow EventBridge to invoke DB Scanner Lambda
+	// Allow EventBridge to invoke DB Scanner Lambda (using alias)
 	_, err = lambda.NewPermission(ctx, "aurora-db-scanner-permission", &lambda.PermissionArgs{
 		Action:    pulumi.String("lambda:InvokeFunction"),
 		Function:  dbScannerLambda.Name,
+		Qualifier: dbScannerAlias.Name, // Add qualifier for the alias
 		Principal: pulumi.String("events.amazonaws.com"),
 		SourceArn: eventRule.Arn,
-	}, pulumi.DependsOn([]pulumi.Resource{dbScannerLambda}))
+	}, pulumi.DependsOn([]pulumi.Resource{dbScannerAlias}))
 	if err != nil {
 		return nil, err
 	}
 
-	// Create SQS event source mapping for Log Detector Lambda
+	// Create SQS event source mapping for Log Detector Lambda (using alias)
 	_, err = lambda.NewEventSourceMapping(ctx, "aurora-log-detector-sqs-mapping", &lambda.EventSourceMappingArgs{
 		EventSourceArn: queue.Arn,
-		FunctionName:   logDetectorLambda.Arn,
+		FunctionName:   logDetectorAlias.Arn, // Use alias ARN instead of function ARN
 		BatchSize:      pulumi.Int(lambdaBatchSize),
-	}, pulumi.DependsOn([]pulumi.Resource{logDetectorLambda}))
+	}, pulumi.DependsOn([]pulumi.Resource{logDetectorAlias}))
 	if err != nil {
 		return nil, err
 	}
 
-	// Create DynamoDB event source mapping for Log Downloader Lambda
+	// Create DynamoDB event source mapping for Log Downloader Lambda (using alias)
 	_, err = lambda.NewEventSourceMapping(ctx, "aurora-log-downloader-dynamodb-mapping", &lambda.EventSourceMappingArgs{
 		EventSourceArn:   dynamoTable.StreamArn,
-		FunctionName:     logDownloaderLambda.Arn,
+		FunctionName:     logDownloaderAlias.Arn, // Use alias ARN instead of function ARN
 		StartingPosition: pulumi.String("LATEST"),
 		BatchSize:        pulumi.Int(lambdaBatchSize),
-	}, pulumi.DependsOn([]pulumi.Resource{logDownloaderLambda}))
+	}, pulumi.DependsOn([]pulumi.Resource{logDownloaderAlias}))
 	if err != nil {
 		return nil, err
 	}
@@ -430,14 +495,22 @@ func createLogBackupResources(ctx *pulumi.Context, networkResources *NetworkReso
 	ctx.Export("logDetectorLambdaArn", logDetectorLambda.Arn)
 	ctx.Export("logDownloaderLambdaArn", logDownloaderLambda.Arn)
 
+	// Export Lambda aliases
+	ctx.Export("dbScannerLambdaAliasArn", dbScannerAlias.Arn)
+	ctx.Export("logDetectorLambdaAliasArn", logDetectorAlias.Arn)
+	ctx.Export("logDownloaderLambdaAliasArn", logDownloaderAlias.Arn)
+
 	return &LogBackupResources{
-		LogBucket:           logBucket,
-		DynamoDBTable:       dynamoTable,
-		SQSQueue:            queue,
-		LambdaRole:          lambdaRole,
-		DBScannerLambda:     dbScannerLambda,
-		LogDetectorLambda:   logDetectorLambda,
-		LogDownloaderLambda: logDownloaderLambda,
-		EventBridgeRule:     eventRule,
+		LogBucket:                logBucket,
+		DynamoDBTable:            dynamoTable,
+		SQSQueue:                 queue,
+		LambdaRole:               lambdaRole,
+		DBScannerLambda:          dbScannerLambda,
+		DBScannerLambdaAlias:     dbScannerAlias,
+		LogDetectorLambda:        logDetectorLambda,
+		LogDetectorLambdaAlias:   logDetectorAlias,
+		LogDownloaderLambda:      logDownloaderLambda,
+		LogDownloaderLambdaAlias: logDownloaderAlias,
+		EventBridgeRule:          eventRule,
 	}, nil
 }
