@@ -36,17 +36,16 @@ graph TD
     subgraph vpc["VPC"]
         %% VPC Endpoints - 2x2 grid arrangement
         subgraph vpcEndpoints["VPC Endpoints"]
-            direction TB
-            subgraph endpoints1[""]
-                direction LR
-                S3Endpoint["S3 VPC Endpoint"]
-                DynamoDBEndpoint["DynamoDB VPC Endpoint"]
-            end
-            subgraph endpoints2[""]
-                direction LR
-                RDSEndpoint["RDS VPC Endpoint"]
-                SQSEndpoint["SQS VPC Endpoint"]
-            end
+            S3Endpoint["S3 VPC Endpoint"]
+            DynamoDBEndpoint["DynamoDB VPC Endpoint"]
+            RDSEndpoint["RDS VPC Endpoint"]
+            SQSEndpoint["SQS VPC Endpoint"]
+            
+            %% Arrange in 2x2 grid
+            S3Endpoint --- DynamoDBEndpoint
+            RDSEndpoint --- SQSEndpoint
+            S3Endpoint ~~~ RDSEndpoint
+            DynamoDBEndpoint ~~~ SQSEndpoint
         end
         
         %% Private Subnets with Aurora inside
