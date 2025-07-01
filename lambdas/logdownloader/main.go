@@ -119,12 +119,37 @@ func unmarshalDynamoDBEvent(image map[string]events.DynamoDBAttributeValue, out 
 	// Convert events.DynamoDBAttributeValue to map[string]interface{}
 	item := make(map[string]interface{})
 
+	// Special handling for numeric fields that might be strings
+	_, isLogRecord := out.(*LogFileRecord)
+
 	for k, v := range image {
 		switch v.DataType() {
 		case events.DataTypeString:
-			item[k] = v.String()
+			// Special handling for numeric fields that might be strings
+			if isLogRecord && (k == "Size" || k == "LastWritten" || k == "LastBackup") {
+				// Try to convert string to int64
+				val, err := strconv.ParseInt(v.String(), 10, 64)
+				if err == nil {
+					item[k] = val
+				} else {
+					// If conversion fails, use the string value
+					item[k] = v.String()
+				}
+			} else {
+				item[k] = v.String()
+			}
 		case events.DataTypeNumber:
-			item[k] = v.Number()
+			// For numeric fields, ensure they're parsed as int64
+			if isLogRecord && (k == "Size" || k == "LastWritten" || k == "LastBackup") {
+				val, err := strconv.ParseInt(v.Number(), 10, 64)
+				if err == nil {
+					item[k] = val
+				} else {
+					item[k] = v.Number()
+				}
+			} else {
+				item[k] = v.Number()
+			}
 		case events.DataTypeBinary:
 			item[k] = v.Binary()
 		case events.DataTypeBoolean:
