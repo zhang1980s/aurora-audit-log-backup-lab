@@ -33,5 +33,8 @@ COPY main.go ./
 # Build the application
 RUN go build -o bootstrap main.go
 
+# Move bootstrap to the location expected by AWS Lambda runtime
+RUN mkdir -p /var/runtime && cp bootstrap /var/runtime/
+
 # Set the CMD to the handler
-CMD [ "bootstrap" ]
+CMD [ "/var/runtime/bootstrap" ]
