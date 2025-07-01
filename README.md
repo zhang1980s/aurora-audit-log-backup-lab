@@ -8,7 +8,7 @@ The project is organized into three main components:
 
 1. **Fundamental Network Environment**: VPC, subnets, route tables, and VPC endpoints for secure private access
 2. **Log Backup Resources**: Lambda functions with versioning, DynamoDB table, SQS queue, and S3 bucket for log backups
-3. **Aurora Test Environment**: Aurora MySQL cluster with audit logging enabled and EC2 instance for testing
+3. **Aurora Test Environment**: Aurora MySQL cluster with audit logging enabled
 
 ### Architecture Diagram
 
