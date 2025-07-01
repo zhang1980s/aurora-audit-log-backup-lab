@@ -76,8 +76,18 @@ func Handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 			record := LogFileRecord{
 				DBInstanceIdentifier: dbInstanceID,
 				LogFileName:          *logFile.LogFileName,
-				Size:                 logFile.Size,
-				LastWritten:          logFile.LastWritten,
+				Size:                 0, // Default value
+				LastWritten:          0, // Default value
+			}
+
+			// Handle nullable Size field
+			if logFile.Size != nil {
+				record.Size = *logFile.Size
+			}
+
+			// Handle nullable LastWritten field
+			if logFile.LastWritten != nil {
+				record.LastWritten = *logFile.LastWritten
 			}
 
 			// Check if the record already exists in DynamoDB

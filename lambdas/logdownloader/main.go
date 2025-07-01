@@ -264,7 +264,7 @@ func downloadLogFile(ctx context.Context, client *rds.Client, dbInstanceID, logF
 		}
 
 		// Check if there are more pages
-		if !resp.AdditionalDataPending {
+		if resp.AdditionalDataPending == nil || !*resp.AdditionalDataPending {
 			break
 		}
 		marker = resp.Marker
