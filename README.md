@@ -13,55 +13,75 @@ The project is organized into three main components:
 ### Architecture Diagram
 
 ```mermaid
-flowchart TB
-    %% AWS Services outside VPC
-    EventBridge["EventBridge\nScheduled Rule"]
-    SQS["SQS Queue"]
-    DynamoDB["DynamoDB Table"]
-    S3["S3 Bucket"]
-    ECR["ECR Repositories"]
+graph TD
+    %% Theme settings
+    classDef default fill:#333,stroke:#666,color:#fff
+    classDef awsService fill:#232F3E,stroke:#666,color:#fff
+    classDef vpc fill:#444,stroke:#666,color:#fff,stroke-width:2px
+    classDef subnet fill:#555,stroke:#666,color:#fff
+    classDef lambda fill:#333,stroke:#666,color:#fff
+    classDef endpoint fill:#444,stroke:#666,color:#fff
     
-    %% VPC and Subnets
-    subgraph VPC["VPC"]
-        subgraph LambdaSubnet["Private Subnet - Lambda Functions"]
-            Scanner["DB Scanner Lambda"]
-            Detector["Log Detector Lambda"]
-            Downloader["Log Downloader Lambda"]
+    %% AWS Services section
+    subgraph awsServices["AWS Services"]
+        ECR["ECR Repositories"]
+        EventBridge["EventBridge Rule"]
+        SQS["SQS Queue"]
+        DynamoDB["DynamoDB Table"]
+        S3Bucket["S3 Bucket"]
+    end
+    
+    %% VPC section
+    subgraph vpc["VPC"]
+        %% Private Subnets
+        subgraph privateSubnets["Private Subnets"]
+            DBScanner["DB Scanner Lambda\nwith versioning"]
+            LogDetector["Log Detector Lambda\nwith versioning"]
+            LogDownloader["Log Downloader Lambda\nwith versioning"]
+            Aurora["Aurora MySQL\nwith Audit Logging"]
         end
         
-        subgraph DBSubnet["Private Subnet - Database"]
-            Aurora["Aurora MySQL\nwith Audit Logging"]
+        %% VPC Endpoints
+        subgraph vpcEndpoints["VPC Endpoints"]
+            S3Endpoint["S3 VPC Endpoint"]
+            DynamoDBEndpoint["DynamoDB VPC Endpoint"]
+            RDSEndpoint["RDS VPC Endpoint"]
+            SQSEndpoint["SQS VPC Endpoint"]
         end
     end
     
-    %% Connections with numbered workflow
-    EventBridge -->|1. Schedule| Scanner
-    Scanner -->|2. DB IDs| SQS
-    SQS -->|3. Process| Detector
-    Detector -->|4. Query logs| Aurora
-    Detector -->|5. Store metadata| DynamoDB
-    DynamoDB -->|6. Stream events| Downloader
-    Downloader -->|7. Download logs| Aurora
-    Downloader -->|8. Upload logs| S3
-    Downloader -->|9. Update status| DynamoDB
+    %% Connections
+    ECR -- "Provides images" --> DBScanner
+    ECR -- "Provides images" --> LogDetector
+    ECR -- "Provides images" --> LogDownloader
     
-    %% Container images
-    ECR -.->|Container images| Scanner
-    ECR -.->|Container images| Detector
-    ECR -.->|Container images| Downloader
+    EventBridge -- "Triggers" --> DBScanner
+    DBScanner -- "Sends DB IDs" --> SQS
+    SQS -- "Triggers" --> LogDetector
     
-    %% Styling
-    classDef aws fill:#FF9900,stroke:#232F3E,color:#232F3E
-    classDef lambda fill:#009900,stroke:#232F3E,color:white
-    classDef database fill:#3B48CC,stroke:#232F3E,color:white
-    classDef storage fill:#3B48CC,stroke:#232F3E,color:white
-    classDef subnet fill:#F5F5F5,stroke:#232F3E,color:#232F3E
+    LogDetector -- "Stores log metadata" --> DynamoDB
+    DynamoDB -- "Streams" --> LogDownloader
     
-    class EventBridge,SQS,DynamoDB,ECR aws
-    class Scanner,Detector,Downloader lambda
-    class Aurora database
-    class S3 storage
-    class LambdaSubnet,DBSubnet subnet
+    LogDetector -- "Uses" --> Aurora
+    LogDownloader -- "Downloads logs" --> Aurora
+    LogDownloader -- "Uploads logs" --> S3Bucket
+    
+    %% VPC Endpoint connections
+    LogDetector -- "Uses" --> S3Endpoint
+    LogDetector -- "Uses" --> DynamoDBEndpoint
+    LogDetector -- "Uses" --> RDSEndpoint
+    LogDetector -- "Uses" --> SQSEndpoint
+    
+    LogDownloader -- "Uses" --> S3Endpoint
+    LogDownloader -- "Uses" --> DynamoDBEndpoint
+    LogDownloader -- "Uses" --> RDSEndpoint
+    
+    %% Apply classes
+    class awsServices awsService
+    class vpc vpc
+    class privateSubnets subnet
+    class vpcEndpoints endpoint
+    class DBScanner,LogDetector,LogDownloader lambda
 ```
 
 ![Aurora Audit Log Backup Architecture](generated-diagrams/aurora-audit-log-backup-architecture.png)
