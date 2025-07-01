@@ -17,6 +17,7 @@ type NetworkResources struct {
 	InternetGateway     *ec2.InternetGateway
 	S3VpcEndpoint       *ec2.VpcEndpoint
 	DynamoDBVpcEndpoint *ec2.VpcEndpoint
+	RDSVpcEndpoint      *ec2.VpcEndpoint
 	PublicRouteTable    *ec2.RouteTable
 	PrivateRouteTable   *ec2.RouteTable
 }
@@ -119,6 +120,43 @@ func createNetworkResources(ctx *pulumi.Context) (*NetworkResources, error) {
 		return nil, err
 	}
 
+	// Create security group for VPC endpoints
+	vpcEndpointSG, err := ec2.NewSecurityGroup(ctx, "vpc-endpoint-sg", &ec2.SecurityGroupArgs{
+		VpcId:       vpc.ID(),
+		Description: pulumi.String("Security group for VPC endpoints"),
+		Ingress: ec2.SecurityGroupIngressArray{
+			&ec2.SecurityGroupIngressArgs{
+				Protocol:    pulumi.String("tcp"),
+				FromPort:    pulumi.Int(443),
+				ToPort:      pulumi.Int(443),
+				CidrBlocks:  pulumi.StringArray{pulumi.String("10.0.0.0/16")}, // Allow HTTPS from within the VPC
+				Description: pulumi.String("Allow HTTPS from VPC"),
+			},
+		},
+		Tags: pulumi.StringMap{
+			"Name": pulumi.String("vpc-endpoint-sg"),
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Create RDS API VPC Endpoint
+	rdsVpcEndpoint, err := ec2.NewVpcEndpoint(ctx, "rds-vpc-endpoint", &ec2.VpcEndpointArgs{
+		VpcId:             vpc.ID(),
+		ServiceName:       pulumi.String(fmt.Sprintf("com.amazonaws.%s.rds", region)),
+		VpcEndpointType:   pulumi.String("Interface"),
+		SubnetIds:         pulumi.StringArray{privateSubnet1.ID(), privateSubnet2.ID()},
+		SecurityGroupIds:  pulumi.StringArray{vpcEndpointSG.ID()},
+		PrivateDnsEnabled: pulumi.Bool(true),
+		Tags: pulumi.StringMap{
+			"Name": pulumi.String("aurora-rds-vpc-endpoint"),
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	// Create public route table
 	publicRouteTable, err := ec2.NewRouteTable(ctx, "public-rt", &ec2.RouteTableArgs{
 		VpcId: vpc.ID(),
@@ -200,6 +238,7 @@ func createNetworkResources(ctx *pulumi.Context) (*NetworkResources, error) {
 		InternetGateway:     igw,
 		S3VpcEndpoint:       s3VpcEndpoint,
 		DynamoDBVpcEndpoint: dynamoDBVpcEndpoint,
+		RDSVpcEndpoint:      rdsVpcEndpoint,
 		PublicRouteTable:    publicRouteTable,
 		PrivateRouteTable:   privateRouteTable,
 	}, nil
