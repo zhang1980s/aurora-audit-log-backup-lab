@@ -33,7 +33,9 @@ func createNetworkResources(ctx *pulumi.Context) (*NetworkResources, error) {
 	az2 := projectCfg.Require("availabilityZone2")
 	// Create VPC
 	vpc, err := ec2.NewVpc(ctx, "aurora-vpc", &ec2.VpcArgs{
-		CidrBlock: pulumi.String("10.0.0.0/16"),
+		CidrBlock:          pulumi.String("10.0.0.0/16"),
+		EnableDnsSupport:   pulumi.Bool(true),
+		EnableDnsHostnames: pulumi.Bool(true),
 		Tags: pulumi.StringMap{
 			"Name": pulumi.String("aurora-vpc"),
 		},
