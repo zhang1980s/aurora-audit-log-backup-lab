@@ -10,7 +10,7 @@ The project is organized into three main components:
 2. **Log Backup Resources**: Lambda functions with versioning, DynamoDB table, SQS queue, and S3 bucket for log backups
 3. **Aurora Test Environment**: Aurora MySQL cluster with audit logging enabled and EC2 instance for testing
 
-![Aurora Audit Log Backup Architecture](generated-diagrams/aurora-audit-log-backup-architecture-v3.png.png)
+![Aurora Audit Log Backup Architecture](generated-diagrams/aurora-audit-log-backup-architecture.png)
 
 ## Project Structure
 
