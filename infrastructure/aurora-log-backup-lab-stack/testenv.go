@@ -20,6 +20,13 @@ type TestEnvironmentResources struct {
 	AuditLogBucket      *s3.Bucket
 	AuroraCluster       *rds.Cluster
 	Ec2Instance         *ec2.Instance
+	// Policy attachments - tracking these ensures proper deletion order
+	SsmPolicyAttachment          *iam.RolePolicyAttachment
+	RdsAuthPolicyAttachment      *iam.RolePolicyAttachment
+	S3AccessPolicyAttachment     *iam.RolePolicyAttachment
+	RdsDescribePolicyAttachment  *iam.RolePolicyAttachment
+	SsmParameterPolicyAttachment *iam.RolePolicyAttachment
+	AuroraS3PolicyAttachment     *iam.RolePolicyAttachment
 }
 
 // createTestEnvironmentResources creates the Aurora test environment
@@ -168,7 +175,7 @@ func createTestEnvironmentResources(ctx *pulumi.Context, networkResources *Netwo
 	}
 
 	// Attach SSM policy to EC2 role
-	_, err = iam.NewRolePolicyAttachment(ctx, "ec2-ssm-policy", &iam.RolePolicyAttachmentArgs{
+	ssmPolicyAttachment, err := iam.NewRolePolicyAttachment(ctx, "ec2-ssm-policy", &iam.RolePolicyAttachmentArgs{
 		Role:      ec2Role.Name,
 		PolicyArn: pulumi.String("arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"),
 	})
@@ -195,7 +202,7 @@ func createTestEnvironmentResources(ctx *pulumi.Context, networkResources *Netwo
 	}
 
 	// Attach RDS auth policy to EC2 role
-	_, err = iam.NewRolePolicyAttachment(ctx, "ec2-rds-auth-policy", &iam.RolePolicyAttachmentArgs{
+	rdsAuthPolicyAttachment, err := iam.NewRolePolicyAttachment(ctx, "ec2-rds-auth-policy", &iam.RolePolicyAttachmentArgs{
 		Role:      ec2Role.Name,
 		PolicyArn: rdsAuthPolicy.Arn,
 	})
@@ -236,7 +243,7 @@ func createTestEnvironmentResources(ctx *pulumi.Context, networkResources *Netwo
 	}
 
 	// Attach S3 access policy to EC2 role
-	_, err = iam.NewRolePolicyAttachment(ctx, "ec2-s3-access-policy", &iam.RolePolicyAttachmentArgs{
+	s3AccessPolicyAttachment, err := iam.NewRolePolicyAttachment(ctx, "ec2-s3-access-policy", &iam.RolePolicyAttachmentArgs{
 		Role:      ec2Role.Name,
 		PolicyArn: s3AccessPolicy.Arn,
 	})
@@ -265,7 +272,7 @@ func createTestEnvironmentResources(ctx *pulumi.Context, networkResources *Netwo
 	}
 
 	// Attach RDS describe policy to EC2 role
-	_, err = iam.NewRolePolicyAttachment(ctx, "ec2-rds-describe-policy", &iam.RolePolicyAttachmentArgs{
+	rdsDescribePolicyAttachment, err := iam.NewRolePolicyAttachment(ctx, "ec2-rds-describe-policy", &iam.RolePolicyAttachmentArgs{
 		Role:      ec2Role.Name,
 		PolicyArn: rdsDescribePolicy.Arn,
 	})
@@ -294,7 +301,7 @@ func createTestEnvironmentResources(ctx *pulumi.Context, networkResources *Netwo
 	}
 
 	// Attach SSM Parameter Store policy to EC2 role
-	_, err = iam.NewRolePolicyAttachment(ctx, "ec2-ssm-parameter-policy", &iam.RolePolicyAttachmentArgs{
+	ssmParameterPolicyAttachment, err := iam.NewRolePolicyAttachment(ctx, "ec2-ssm-parameter-policy", &iam.RolePolicyAttachmentArgs{
 		Role:      ec2Role.Name,
 		PolicyArn: ssmPolicy.Arn,
 	})
@@ -302,10 +309,17 @@ func createTestEnvironmentResources(ctx *pulumi.Context, networkResources *Netwo
 		return nil, err
 	}
 
-	// Create EC2 instance profile
+	// Create EC2 instance profile with explicit dependencies on policy attachments
+	// This ensures that policy attachments are created before the instance profile
 	ec2InstanceProfile, err := iam.NewInstanceProfile(ctx, "ec2-instance-profile", &iam.InstanceProfileArgs{
 		Role: ec2Role.Name,
-	})
+	}, pulumi.DependsOn([]pulumi.Resource{
+		ssmPolicyAttachment,
+		rdsAuthPolicyAttachment,
+		s3AccessPolicyAttachment,
+		rdsDescribePolicyAttachment,
+		ssmParameterPolicyAttachment,
+	}))
 	if err != nil {
 		return nil, err
 	}
@@ -332,7 +346,7 @@ func createTestEnvironmentResources(ctx *pulumi.Context, networkResources *Netwo
 	}
 
 	// Attach S3 access policy to Aurora role
-	_, err = iam.NewRolePolicyAttachment(ctx, "aurora-s3-access-policy", &iam.RolePolicyAttachmentArgs{
+	auroraS3PolicyAttachment, err := iam.NewRolePolicyAttachment(ctx, "aurora-s3-access-policy", &iam.RolePolicyAttachmentArgs{
 		Role:      auroraRole.Name,
 		PolicyArn: s3AccessPolicy.Arn,
 	})
@@ -639,7 +653,8 @@ chown -R ec2-user:ec2-user /home/ec2-user/scripts
 
 	// Use key pair name from configuration
 
-	// Create EC2 instance
+	// Create EC2 instance with explicit dependency on instance profile
+	// This ensures that the instance profile is created before the EC2 instance
 	ec2Instance, err := ec2.NewInstance(ctx, "aurora-ec2", &ec2.InstanceArgs{
 		Ami:                      pulumi.String(ami.Id),
 		InstanceType:             pulumi.String(ec2InstanceType),
@@ -652,7 +667,7 @@ chown -R ec2-user:ec2-user /home/ec2-user/scripts
 		Tags: pulumi.StringMap{
 			"Name": pulumi.String("aurora-ec2"),
 		},
-	})
+	}, pulumi.DependsOn([]pulumi.Resource{ec2InstanceProfile}))
 	if err != nil {
 		return nil, err
 	}
@@ -665,6 +680,8 @@ chown -R ec2-user:ec2-user /home/ec2-user/scripts
 	// Export S3 bucket name
 	ctx.Export("auditLogBucketName", auditLogBucket.ID())
 
+	// Store policy attachments in the return struct to ensure they're tracked
+	// This helps maintain proper deletion order during destroy
 	return &TestEnvironmentResources{
 		Ec2SecurityGroup:    ec2SecurityGroup,
 		AuroraSecurityGroup: auroraSecurityGroup,
@@ -674,5 +691,12 @@ chown -R ec2-user:ec2-user /home/ec2-user/scripts
 		AuditLogBucket:      auditLogBucket,
 		AuroraCluster:       cluster,
 		Ec2Instance:         ec2Instance,
+		// Include policy attachments to ensure they're tracked and deleted in the right order
+		SsmPolicyAttachment:          ssmPolicyAttachment,
+		RdsAuthPolicyAttachment:      rdsAuthPolicyAttachment,
+		S3AccessPolicyAttachment:     s3AccessPolicyAttachment,
+		RdsDescribePolicyAttachment:  rdsDescribePolicyAttachment,
+		SsmParameterPolicyAttachment: ssmParameterPolicyAttachment,
+		AuroraS3PolicyAttachment:     auroraS3PolicyAttachment,
 	}, nil
 }
