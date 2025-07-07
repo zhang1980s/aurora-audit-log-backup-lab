@@ -28,6 +28,7 @@ type HourlyTotal struct {
 	Date      string
 	Hour      string
 	TotalSize int64
+	FileCount int // Number of log files in this hour
 }
 
 // DisplayKey returns a formatted display key for the hourly total
@@ -133,6 +134,7 @@ func ProcessDBInstance(ctx context.Context, rdsSvc *rds.Client, dbInstanceID str
 				}
 			}
 			total.TotalSize += *logFile.Size
+			total.FileCount++ // Increment file count
 			hourlyTotals[hourKey] = total
 			processedCount++
 		} else {
@@ -144,8 +146,8 @@ func ProcessDBInstance(ctx context.Context, rdsSvc *rds.Client, dbInstanceID str
 	// Display hourly breakdown
 	fmt.Printf("\nHourly breakdown for DB Instance: %s\n", dbInstanceID)
 	fmt.Printf("Log Type: %s, Processed: %d, Unmatched: %d\n", logType, processedCount, unmatchedCount)
-	fmt.Println("Date Hour, Size (bytes), Size (human readable)")
-	fmt.Println("----------------------------------------")
+	fmt.Println("Date Hour, Files, Size (bytes), Size (human readable)")
+	fmt.Println("--------------------------------------------------")
 
 	if len(hourlyTotals) == 0 {
 		fmt.Println("No log files matched the date/hour patterns!")
@@ -159,7 +161,7 @@ func ProcessDBInstance(ctx context.Context, rdsSvc *rds.Client, dbInstanceID str
 
 		for _, hourKey := range hourKeys {
 			total := hourlyTotals[hourKey]
-			fmt.Printf("%-20s %12d %20s\n", total.DisplayKey(), total.TotalSize, FormatSize(total.TotalSize))
+			fmt.Printf("%-20s %6d %12d %20s\n", total.DisplayKey(), total.FileCount, total.TotalSize, FormatSize(total.TotalSize))
 		}
 	}
 
@@ -200,8 +202,8 @@ func DisplayCombinedTotals(allHourlyTotals []map[string]HourlyTotal) {
 	fmt.Println("========================================================")
 	fmt.Println("COMBINED TOTALS ACROSS ALL DB INSTANCES")
 	fmt.Println("========================================================")
-	fmt.Println("Date Hour, Size (bytes), Size (human readable)")
-	fmt.Println("----------------------------------------")
+	fmt.Println("Date Hour, Files, Size (bytes), Size (human readable)")
+	fmt.Println("--------------------------------------------------")
 
 	// Combine totals from all instances
 	combinedTotals := make(map[string]HourlyTotal)
@@ -215,6 +217,7 @@ func DisplayCombinedTotals(allHourlyTotals []map[string]HourlyTotal) {
 				}
 			}
 			combined.TotalSize += hourTotal.TotalSize
+			combined.FileCount += hourTotal.FileCount // Add file counts
 			combinedTotals[hourKey] = combined
 		}
 	}
@@ -233,7 +236,7 @@ func DisplayCombinedTotals(allHourlyTotals []map[string]HourlyTotal) {
 
 	for _, hourKey := range hourKeys {
 		total := combinedTotals[hourKey]
-		fmt.Printf("%-20s %12d %20s\n", total.DisplayKey(), total.TotalSize, FormatSize(total.TotalSize))
+		fmt.Printf("%-20s %6d %12d %20s\n", total.DisplayKey(), total.FileCount, total.TotalSize, FormatSize(total.TotalSize))
 	}
 	fmt.Println()
 }

@@ -298,8 +298,22 @@ The Lambda functions follow a clean architecture approach with:
 - **Combined Totals**: Aggregated hourly totals across all DB instances
 - **Human-readable Formatting**: Automatic conversion of sizes to appropriate units (KB, MB, GB)
 - **Improved Output Format**: Clear separation of results by DB instance with better formatting
+- **File Count Display**: Added log file count information in the output
 - **Verbose Mode**: Added detailed output option for debugging purposes
 - **Region Override**: Support for specifying AWS region via command-line flag
+
+### New Utility Scripts
+
+- **DynamoDB Log Size Calculator**: Added `calculate_ddb_log_size` tool to analyze DynamoDB tables:
+  - Check for empty `HumanReadableLastWritten` attributes
+  - Calculate time difference between min and max timestamps
+  - Provide detailed statistics on table contents
+
+- **DynamoDB Record Deletion Tool**: Added `delete_ddb_records` tool for efficient table cleanup:
+  - Parallel processing with configurable worker count
+  - Batch deletion with configurable batch size
+  - Dry run mode for testing without actual deletion
+  - Progress reporting and error handling
 
 ## Makefile Commands
 
