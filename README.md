@@ -221,6 +221,18 @@ Key features:
 
 All Lambda functions use container images with versioning and aliases for controlled deployments.
 
+#### Lambda Function Architecture
+
+The Lambda functions follow a clean architecture approach with:
+
+- **Directory Structure**: Organized into `cmd/`, `internal/`, and `pkg/` directories
+- **Separation of Concerns**: Implemented with handler, service, and repository layers
+- **Dependency Injection**: Used for AWS clients and services
+- **Structured Logging**: Enhanced with zap logger
+- **X-Ray Tracing**: Detailed subsegments and annotations for observability
+- **Error Handling**: Custom error types and wrapping
+- **AWS SDK v6**: Using the latest version of the AWS SDK
+
 ### Infrastructure Resources
 
 - VPC with public and private subnets
@@ -234,6 +246,21 @@ All Lambda functions use container images with versioning and aliases for contro
 - DynamoDB table for tracking log files
 - SQS queue for DB instance IDs
 - EventBridge rule for scheduling the DB Scanner Lambda
+
+## Recent Improvements
+
+### Enhanced Observability and Error Handling
+
+- **AWS X-Ray Integration**: Comprehensive tracing with segments and subsegments throughout the execution flow
+- **Performance Metrics**: Timing data for critical operations
+- **Contextual Logging**: Rich logging with trace IDs and operation metadata
+- **Error Correlation**: Linking errors to specific operations and inputs
+
+### Bug Fixes
+
+- **S3 Checksum Format**: Fixed S3 uploads by converting SHA256 checksums from hexadecimal to base64 format
+- **X-Ray Context Propagation**: Ensured proper context propagation for X-Ray subsegments
+- **Lambda Optimization**: Removed unnecessary EC2/ECS initialization code for Lambda-only environments
 
 ## Makefile Commands
 
