@@ -9,8 +9,6 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/aws/aws-xray-sdk-go/awsplugins/ec2"
-	"github.com/aws/aws-xray-sdk-go/awsplugins/ecs"
 	"github.com/aws/aws-xray-sdk-go/xray"
 
 	appconfig "github.com/zhang1980s/aurora-audit-log-backup-lab/lambdas/logdownloader/internal/config"
@@ -27,10 +25,6 @@ var (
 
 // init function runs during cold start
 func init() {
-	// Configure X-Ray
-	ec2.Init() // For EC2 metadata
-	ecs.Init() // For ECS metadata
-
 	// Configure X-Ray logging
 	xray.Configure(xray.Config{
 		LogLevel: os.Getenv("LOG_LEVEL"),
@@ -56,7 +50,8 @@ func main() {
 	log.Debugw("Configuration loaded", "config", cfg.String())
 
 	// Load AWS configuration
-	awsCfg, err := awsconfig.LoadDefaultConfig(context.Background())
+	ctx := context.Background()
+	awsCfg, err := awsconfig.LoadDefaultConfig(ctx)
 	if err != nil {
 		log.Fatalw("Failed to load AWS config", "error", err)
 	}

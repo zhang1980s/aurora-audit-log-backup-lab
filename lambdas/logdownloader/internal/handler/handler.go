@@ -56,7 +56,7 @@ func (h *Handler) Handle(ctx context.Context, event events.DynamoDBEvent) error 
 		}
 
 		// Convert DynamoDB attribute values to Go types
-		newImage, err := convertDynamoDBAttributeValues(record.Change.NewImage)
+		newImage, err := convertDynamoDBAttributeValues(ctx, record.Change.NewImage)
 		if err != nil {
 			h.logger.Errorw("Error converting new image", "error", err)
 			recordSubsegment.AddError(err)
@@ -66,7 +66,7 @@ func (h *Handler) Handle(ctx context.Context, event events.DynamoDBEvent) error 
 
 		var oldImage map[string]interface{}
 		if record.EventName == "MODIFY" {
-			oldImage, err = convertDynamoDBAttributeValues(record.Change.OldImage)
+			oldImage, err = convertDynamoDBAttributeValues(ctx, record.Change.OldImage)
 			if err != nil {
 				h.logger.Errorw("Error converting old image", "error", err)
 				recordSubsegment.AddError(err)
@@ -114,9 +114,8 @@ func (h *Handler) Handle(ctx context.Context, event events.DynamoDBEvent) error 
 }
 
 // convertDynamoDBAttributeValues converts DynamoDB attribute values to Go types
-func convertDynamoDBAttributeValues(attributes map[string]events.DynamoDBAttributeValue) (map[string]interface{}, error) {
-	// Create context and subsegment for X-Ray tracking
-	ctx := context.Background()
+func convertDynamoDBAttributeValues(ctx context.Context, attributes map[string]events.DynamoDBAttributeValue) (map[string]interface{}, error) {
+	// Create subsegment for X-Ray tracking
 	_, subsegment := xray.BeginSubsegment(ctx, "convertDynamoDBAttributeValues")
 	defer subsegment.Close(nil)
 

@@ -21,9 +21,9 @@ config:
   aurora-audit-log-backup-lab:lambdaBatchSize: "10"
   aurora-audit-log-backup-lab:backupLogTypes: "audit"
   # Image versions
-  aurora-audit-log-backup-lab:dbScannerImageVersion: "v1.0.0"
-  aurora-audit-log-backup-lab:logDetectorImageVersion: "v1.0.0"
-  aurora-audit-log-backup-lab:logDownloaderImageVersion: "v1.0.0"
+  aurora-audit-log-backup-lab:dbScannerImageVersion: "v1.0.4"
+  aurora-audit-log-backup-lab:logDetectorImageVersion: "v1.0.4"
+  aurora-audit-log-backup-lab:logDownloaderImageVersion: "v1.0.4"
   aurora-audit-log-backup-lab:publishLambdaVersions: "true"
   aurora-audit-log-backup-lab:customTags: '{"Application": "AuroraAuditLogBackup", "Environment": "Lab", "auto-delete": "no", "Team": "personal"}'
   aurora-audit-log-backup-lab:environment: dev

@@ -3,6 +3,8 @@ package repository
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/hex"
 	"strconv"
 	"time"
 
@@ -171,16 +173,44 @@ func (r *DynamoDBRepository) UploadToS3(ctx context.Context, key string, content
 	xray.AddMetadata(ctx, "content_size", len(content))
 	xray.AddMetadata(ctx, "content_sha256", sha256sum)
 
+	// Convert hexadecimal SHA256 to binary and then to base64 for S3 API
+	// AWS S3 expects the ChecksumSHA256 to be base64 encoded, not hex
+	var binarySha256 []byte
+	var err error
+
+	// Log the incoming SHA256 format for debugging
+	r.logger.Debugw("SHA256 checksum format",
+		"hex_sha256", sha256sum,
+		"length", len(sha256sum))
+
+	// Convert hex string to binary
+	binarySha256, err = hex.DecodeString(sha256sum)
+	if err != nil {
+		r.logger.Errorw("Failed to decode hex SHA256 checksum",
+			"error", err,
+			"sha256", sha256sum)
+		xray.AddError(ctx, err)
+		subsegment.AddError(err)
+		return errors.Wrap(errors.ErrUpload, "failed to decode hex SHA256 checksum")
+	}
+
+	// Convert binary to base64
+	base64Sha256 := base64.StdEncoding.EncodeToString(binarySha256)
+
+	r.logger.Debugw("Converted SHA256 checksum",
+		"original_hex", sha256sum,
+		"base64", base64Sha256)
+
 	// Perform the S3 upload with SHA256 checksum as metadata
-	_, err := r.s3Client.PutObject(ctx, &s3.PutObjectInput{
+	_, err = r.s3Client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:      aws.String(r.bucketName),
 		Key:         aws.String(key),
 		Body:        bytes.NewReader(content),
 		ContentType: aws.String("text/plain"),
 		Metadata: map[string]string{
-			"SHA256Checksum": sha256sum,
+			"SHA256Checksum": sha256sum, // Keep original hex in metadata
 		},
-		ChecksumSHA256: aws.String(sha256sum),
+		ChecksumSHA256: aws.String(base64Sha256), // Use base64 for S3 API
 	})
 
 	// Record error in X-Ray if one occurred
