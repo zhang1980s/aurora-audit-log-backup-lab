@@ -28,10 +28,10 @@ COPY go.mod go.sum* ./
 RUN go mod download
 
 # Copy source code
-COPY main.go ./
+COPY . ./
 
 # Build the application
-RUN go build -o bootstrap main.go
+RUN go build -o bootstrap ./cmd/main.go
 
 # Move bootstrap to the location expected by AWS Lambda runtime
 RUN mkdir -p /var/runtime && cp bootstrap /var/runtime/

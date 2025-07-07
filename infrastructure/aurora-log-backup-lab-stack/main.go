@@ -2,10 +2,19 @@ package main
 
 import (
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
+
+	"aurora-audit-log-backup-lab/config"
+	"aurora-audit-log-backup-lab/resources"
 )
 
 func main() {
 	pulumi.Run(func(ctx *pulumi.Context) error {
+		// Load configuration
+		cfg, err := config.LoadConfig(ctx)
+		if err != nil {
+			return err
+		}
+
 		// Get ECR repository URLs from ECR stack
 		ecrStack, err := pulumi.NewStackReference(ctx, "zhang1980s/aurora-ecr/dev", nil)
 		if err != nil {
@@ -13,19 +22,19 @@ func main() {
 		}
 
 		// 1. Create fundamental network environment
-		networkResources, err := createNetworkResources(ctx)
+		networkResources, err := resources.CreateNetworkResources(ctx, cfg)
 		if err != nil {
 			return err
 		}
 
 		// 2. Create log backup resources
-		logBackupResources, err := createLogBackupResources(ctx, networkResources, ecrStack)
+		logBackupResources, err := resources.CreateLogBackupResources(ctx, cfg, networkResources, ecrStack)
 		if err != nil {
 			return err
 		}
 
 		// 3. Create Aurora test environment
-		testEnvResources, err := createTestEnvironmentResources(ctx, networkResources)
+		testEnvResources, err := resources.CreateTestEnvironmentResources(ctx, cfg, networkResources)
 		if err != nil {
 			return err
 		}
@@ -44,6 +53,9 @@ func main() {
 		// Export Test Environment resources
 		ctx.Export("ec2PublicIp", testEnvResources.Ec2Instance.PublicIp)
 		ctx.Export("auroraEndpoint", testEnvResources.AuroraCluster.Endpoint)
+		ctx.Export("auroraReadEndpoint", testEnvResources.AuroraCluster.ReaderEndpoint)
+		ctx.Export("auroraPrimaryId", testEnvResources.AuroraPrimary.ID())
+		ctx.Export("auroraReplicaId", testEnvResources.AuroraReplica.ID())
 		ctx.Export("auditLogBucketName", testEnvResources.AuditLogBucket.ID())
 
 		return nil

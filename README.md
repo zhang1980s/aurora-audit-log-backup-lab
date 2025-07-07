@@ -186,6 +186,21 @@ Configuration values are stored in the Pulumi stack configuration files:
 
 You can modify these files to customize the deployment.
 
+### Log Backup Configuration
+
+The Log Detector Lambda can be configured to backup different types of logs using the `backupLogTypes` configuration parameter in `Pulumi.dev.yaml`:
+
+```yaml
+aurora-audit-log-backup-lab:backupLogTypes: "audit,error,instance"
+```
+
+This parameter accepts a comma-separated list of log types to backup:
+- `audit`: Backup audit logs (files starting with "audit" or "audit/")
+- `error`: Backup error logs (files starting with "error" or "error/")
+- `instance`: Backup instance logs (files starting with "instance" or "instance/")
+
+By default, only audit logs are backed up if this parameter is not specified.
+
 ## Lambda Versioning
 
 This project implements Lambda versioning and aliases for better deployment control and rollback capabilities. For detailed information, see [LAMBDA-VERSIONING.md](LAMBDA-VERSIONING.md).

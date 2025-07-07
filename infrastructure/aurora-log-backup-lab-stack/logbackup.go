@@ -3,13 +3,13 @@ package main
 import (
 	"strconv"
 
-	"github.com/pulumi/pulumi-aws/sdk/v5/go/aws/cloudwatch"
-	"github.com/pulumi/pulumi-aws/sdk/v5/go/aws/dynamodb"
-	"github.com/pulumi/pulumi-aws/sdk/v5/go/aws/ec2"
-	"github.com/pulumi/pulumi-aws/sdk/v5/go/aws/iam"
-	"github.com/pulumi/pulumi-aws/sdk/v5/go/aws/lambda"
-	"github.com/pulumi/pulumi-aws/sdk/v5/go/aws/s3"
-	"github.com/pulumi/pulumi-aws/sdk/v5/go/aws/sqs"
+	"github.com/pulumi/pulumi-aws/sdk/v6/go/aws/cloudwatch"
+	"github.com/pulumi/pulumi-aws/sdk/v6/go/aws/dynamodb"
+	"github.com/pulumi/pulumi-aws/sdk/v6/go/aws/ec2"
+	"github.com/pulumi/pulumi-aws/sdk/v6/go/aws/iam"
+	"github.com/pulumi/pulumi-aws/sdk/v6/go/aws/lambda"
+	"github.com/pulumi/pulumi-aws/sdk/v6/go/aws/s3"
+	"github.com/pulumi/pulumi-aws/sdk/v6/go/aws/sqs"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi/config"
 )
@@ -433,13 +433,14 @@ func createLogBackupResources(ctx *pulumi.Context, networkResources *NetworkReso
 		return nil, err
 	}
 
-	// Create EventBridge rule to trigger DB Scanner Lambda
+	// Create EventBridge rule to trigger DB Scanner Lambda (initially disabled)
 	eventRule, err := cloudwatch.NewEventRule(ctx, "aurora-db-scanner-schedule", &cloudwatch.EventRuleArgs{
 		ScheduleExpression: pulumi.String(eventBridgeSchedule),
 		Description:        pulumi.String("Trigger Aurora DB Scanner Lambda every 15 minutes"),
 		Tags: pulumi.StringMap{
 			"Name": pulumi.String("aurora-db-scanner-schedule"),
 		},
+		State: pulumi.String("DISABLED"), // Create the rule in disabled state
 	})
 	if err != nil {
 		return nil, err

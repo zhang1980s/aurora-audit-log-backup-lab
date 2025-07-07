@@ -2,3 +2,21 @@ config:
   aws:skipCredentialsValidation: "true"
   aws:skipMetadataApiCheck: "false"
   aws:region: "ap-southeast-1"
+  
+  # Mandatory tags
+  environment: "dev"
+  project: "aurora-audit-log-backup"
+  owner: "cloud-engineering-team"
+  
+  # ECR configuration
+  scanOnPush: "true"
+  imageTagMutability: "MUTABLE"
+  maxImageCount: "10"
+  
+  # Repository names
+  dbScannerRepo: "aurora-db-scanner"
+  logDetectorRepo: "aurora-log-detector"
+  logDownloaderRepo: "aurora-log-downloader"
+  
+  # Custom tags as JSON string
+  customTags: '{"Application": "AuroraAuditLogBackup", "Environment": "Lab", "auto-delete": "no", "Team": "personal"}'

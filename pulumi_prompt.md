@@ -1,6 +1,3 @@
-# Pulumi AWS Resource Management in Go
-
-You are tasked with generating Pulumi code in Go to manage AWS resources for a project with multiple stacks (e.g., dev, prod). The code must follow Pulumi best practices, prioritize security, and meet the following requirements:
 
 ## File and Directory Structure
 
