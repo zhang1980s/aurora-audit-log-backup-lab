@@ -163,6 +163,18 @@ After deployment, you can connect to the EC2 instance and run the provided test 
    ./test_audit_logs.sh
    ```
 
+4. Calculate log sizes for one or multiple DB instances:
+   ```bash
+   # For a single DB instance
+   ./calculate_log_size.sh <db-instance-id>
+   
+   # For multiple DB instances
+   ./calculate_log_size.sh <db-instance-id-1> <db-instance-id-2> <db-instance-id-3>
+   
+   # Using the default DB instance if none specified
+   ./calculate_log_size.sh
+   ```
+
 ## Cleanup
 
 To destroy all resources:
@@ -261,6 +273,12 @@ The Lambda functions follow a clean architecture approach with:
 - **S3 Checksum Format**: Fixed S3 uploads by converting SHA256 checksums from hexadecimal to base64 format
 - **X-Ray Context Propagation**: Ensured proper context propagation for X-Ray subsegments
 - **Lambda Optimization**: Removed unnecessary EC2/ECS initialization code for Lambda-only environments
+
+### Utility Script Enhancements
+
+- **Multi-DB Instance Support**: Enhanced `calculate_log_size.sh` to process multiple DB instances in a single run
+- **Improved Output Format**: Clear separation of results by DB instance with better formatting
+- **Command-line Arguments**: Added support for specifying DB instances as command-line arguments
 
 ## Makefile Commands
 
