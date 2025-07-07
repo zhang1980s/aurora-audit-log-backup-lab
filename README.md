@@ -163,17 +163,32 @@ After deployment, you can connect to the EC2 instance and run the provided test 
    ./test_audit_logs.sh
    ```
 
-4. Calculate log sizes for one or multiple DB instances:
+4. Calculate log sizes for one or multiple DB instances using the Go application:
    ```bash
    # For a single DB instance
-   ./calculate_log_size.sh <db-instance-id>
+   cd ~/scripts/calculate_log_size
+   go run main.go -i <db-instance-id>
    
-   # For multiple DB instances
-   ./calculate_log_size.sh <db-instance-id-1> <db-instance-id-2> <db-instance-id-3>
+   # For multiple DB instances (with combined totals)
+   go run main.go -i <db-instance-id-1>,<db-instance-id-2>,<db-instance-id-3>
    
-   # Using the default DB instance if none specified
-   ./calculate_log_size.sh
+   # Process all DB instances
+   go run main.go -a
+   
+   # Filter by log type (audit, error, instance, all)
+   go run main.go -a -t error
+   
+   # Show help information
+   go run main.go -h
    ```
+   
+   The Go application provides enhanced features:
+   - Filter logs by type (audit, error, instance, all)
+   - Process multiple DB instances with comma-separated list
+   - Display combined totals across all instances
+   - Human-readable size formatting (KB, MB, GB)
+   - Verbose output option for debugging
+   - AWS region override capability
 
 ## Cleanup
 
@@ -276,9 +291,15 @@ The Lambda functions follow a clean architecture approach with:
 
 ### Utility Script Enhancements
 
-- **Multi-DB Instance Support**: Enhanced `calculate_log_size.sh` to process multiple DB instances in a single run
+- **Go Implementation**: Rewrote `calculate_log_size.sh` in Go for better performance and features
+- **Flag-based CLI**: Implemented comprehensive command-line flags with short and long forms
+- **Log Type Filtering**: Added support for filtering logs by type (audit, error, instance, all)
+- **Multi-DB Instance Support**: Process multiple DB instances in a single run with comma-separated list
+- **Combined Totals**: Aggregated hourly totals across all DB instances
+- **Human-readable Formatting**: Automatic conversion of sizes to appropriate units (KB, MB, GB)
 - **Improved Output Format**: Clear separation of results by DB instance with better formatting
-- **Command-line Arguments**: Added support for specifying DB instances as command-line arguments
+- **Verbose Mode**: Added detailed output option for debugging purposes
+- **Region Override**: Support for specifying AWS region via command-line flag
 
 ## Makefile Commands
 
