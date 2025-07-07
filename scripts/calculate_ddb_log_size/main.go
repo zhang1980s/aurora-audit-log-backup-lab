@@ -41,7 +41,7 @@ func main() {
 
 	// Customize usage output
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "DynamoDB Log Size Calculator\n\n")
+		fmt.Fprintf(os.Stderr, "DynamoDB Log Backup Time Calculator\n\n")
 		fmt.Fprintf(os.Stderr, "Usage: %s [options]\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "Options:\n")
 		flag.PrintDefaults()
@@ -102,7 +102,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Scan the table to analyze HumanReadableLastWritten attributes
+	// Scan the table to analyze HumanReadableLastBackup attributes
 	emptyCount, minTime, maxTime, totalRecords, err := analyzeTable(ctx, ddbClient, tableName, verbose)
 	if err != nil {
 		fmt.Printf("Error analyzing table: %v\n", err)
@@ -113,7 +113,7 @@ func main() {
 	fmt.Println("\nAnalysis Results:")
 	fmt.Println("========================================================")
 	fmt.Printf("Total records scanned: %d\n", totalRecords)
-	fmt.Printf("Records with empty HumanReadableLastWritten: %d (%.2f%%)\n",
+	fmt.Printf("Records with empty HumanReadableLastBackup: %d (%.2f%%)\n",
 		emptyCount,
 		float64(emptyCount)/float64(totalRecords)*100)
 
@@ -129,7 +129,7 @@ func main() {
 	}
 }
 
-// analyzeTable scans the DynamoDB table and analyzes the HumanReadableLastWritten attribute
+// analyzeTable scans the DynamoDB table and analyzes the HumanReadableLastBackup attribute
 func analyzeTable(ctx context.Context, ddbClient *dynamodb.Client, tableName string, verbose bool) (int, *time.Time, *time.Time, int, error) {
 	var (
 		emptyCount   int
@@ -155,13 +155,13 @@ func analyzeTable(ctx context.Context, ddbClient *dynamodb.Client, tableName str
 
 		// Process each item
 		for _, item := range result.Items {
-			// Check if HumanReadableLastWritten attribute exists and is not empty
-			if attr, ok := item["HumanReadableLastWritten"]; ok {
+			// Check if HumanReadableLastBackup attribute exists and is not empty
+			if attr, ok := item["HumanReadableLastBackup"]; ok {
 				if s, ok := attr.(*types.AttributeValueMemberS); ok {
 					if s.Value == "" {
 						emptyCount++
 						if verbose {
-							fmt.Println("Found record with empty HumanReadableLastWritten")
+							fmt.Println("Found record with empty HumanReadableLastBackup")
 						}
 					} else {
 						// Parse the time string
@@ -185,14 +185,14 @@ func analyzeTable(ctx context.Context, ddbClient *dynamodb.Client, tableName str
 					// Attribute exists but is not a string
 					emptyCount++
 					if verbose {
-						fmt.Println("Found record with non-string HumanReadableLastWritten")
+						fmt.Println("Found record with non-string HumanReadableLastBackup")
 					}
 				}
 			} else {
 				// Attribute doesn't exist
 				emptyCount++
 				if verbose {
-					fmt.Println("Found record without HumanReadableLastWritten attribute")
+					fmt.Println("Found record without HumanReadableLastBackup attribute")
 				}
 			}
 		}
