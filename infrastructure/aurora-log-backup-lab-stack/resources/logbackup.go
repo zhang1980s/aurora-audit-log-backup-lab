@@ -88,8 +88,8 @@ func CreateLogBackupResources(ctx *pulumi.Context, cfg *config.Config, networkRe
 
 	// Create SQS queue for DB instance IDs
 	queue, err := sqs.NewQueue(ctx, "aurora-db-instances", &sqs.QueueArgs{
-		VisibilityTimeoutSeconds: pulumi.Int(300),   // 5 minutes
-		MessageRetentionSeconds:  pulumi.Int(86400), // 24 hours
+		VisibilityTimeoutSeconds: pulumi.Int(cfg.Lambda.SQSVisibilityTimeout), // Use configured visibility timeout
+		MessageRetentionSeconds:  pulumi.Int(86400),                           // 24 hours
 		Tags:                     utils.CreateResourceTags(ctx, cfg.Tags, "aurora-db-instances"),
 	})
 	if err != nil {

@@ -25,6 +25,7 @@ type LambdaConfig struct {
 	LogDetectorTimeout   int
 	LogDownloaderMemory  int
 	LogDownloaderTimeout int
+	SQSVisibilityTimeout int // Visibility timeout for SQS queue (in seconds)
 	BatchSize            int
 	EventBridgeSchedule  string
 	S3LogPrefix          string
@@ -153,6 +154,22 @@ func LoadConfig(ctx *pulumi.Context) (*Config, error) {
 		return nil, fmt.Errorf("invalid lambdaBatchSize: %v", err)
 	}
 
+	// Get SQS visibility timeout, default to logDetectorTimeout if not specified
+	sqsVisibilityTimeout := logDetectorTimeout // Default to match the Lambda timeout
+	if sqsVisibilityTimeoutStr := projectCfg.Get("sqsVisibilityTimeout"); sqsVisibilityTimeoutStr != "" {
+		sqsVisibilityTimeout, err = strconv.Atoi(sqsVisibilityTimeoutStr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid sqsVisibilityTimeout: %v", err)
+		}
+	}
+
+	// Ensure SQS visibility timeout is at least as long as the Lambda function timeout
+	if sqsVisibilityTimeout < logDetectorTimeout {
+		fmt.Printf("Warning: SQS visibility timeout (%d) is less than LogDetector Lambda timeout (%d). Increasing to match.\n",
+			sqsVisibilityTimeout, logDetectorTimeout)
+		sqsVisibilityTimeout = logDetectorTimeout
+	}
+
 	// Get backup log types, default to "audit" if not specified
 	backupLogTypes := projectCfg.Get("backupLogTypes")
 	if backupLogTypes == "" {
@@ -201,6 +218,7 @@ func LoadConfig(ctx *pulumi.Context) (*Config, error) {
 			LogDetectorTimeout:   logDetectorTimeout,
 			LogDownloaderMemory:  logDownloaderMemory,
 			LogDownloaderTimeout: logDownloaderTimeout,
+			SQSVisibilityTimeout: sqsVisibilityTimeout,
 			BatchSize:            lambdaBatchSize,
 			EventBridgeSchedule:  eventBridgeSchedule,
 			S3LogPrefix:          s3LogPrefix,

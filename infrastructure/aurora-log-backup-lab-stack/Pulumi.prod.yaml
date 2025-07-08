@@ -27,6 +27,7 @@ config:
   aurora-audit-log-backup-lab:logDetectorTimeout: "120"
   aurora-audit-log-backup-lab:logDownloaderMemory: "1024"
   aurora-audit-log-backup-lab:logDownloaderTimeout: "600"
+  aurora-audit-log-backup-lab:sqsVisibilityTimeout: "120"
   aurora-audit-log-backup-lab:eventBridgeSchedule: "rate(5 minutes)"
   aurora-audit-log-backup-lab:s3LogPrefix: "logs"
   aurora-audit-log-backup-lab:lambdaBatchSize: "20"
