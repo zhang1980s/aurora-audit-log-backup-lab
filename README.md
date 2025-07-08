@@ -315,6 +315,25 @@ The Lambda functions follow a clean architecture approach with:
   - Dry run mode for testing without actual deletion
   - Progress reporting and error handling
 
+## Performance Testing
+
+### Aurora MySQL Audit Logs
+
+According to [AWS documentation](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/USER_LogAccess.MySQL.LogFileSize.html), Aurora MySQL audit logs are rotated when the file size reaches 100 MB, and removed after 24 hours.
+
+Our performance testing with the LogDownloader Lambda function showed:
+
+- Downloading a single audit log with maximum size (100 MB) takes approximately 3 seconds
+- Uploading the log file to S3 takes approximately 1 second
+- CPU utilization increases by approximately 4% during the process
+- Downloading 12 GB of audit logs (164 files) from 2 DB instances takes 3 minutes and 38 seconds
+
+![calculate_log_size](./picture/describe-db-logs.png)
+
+![calculate_ddb_log_size](./picture/time-diff-ddb.png)
+
+These metrics demonstrate that the solution is efficient and can handle the maximum log file size within reasonable time and resource constraints, even when processing multiple log files in parallel. The solution also scales well when processing large volumes of log files across multiple DB instances.
+
 ## Makefile Commands
 
 The Makefile provides the following commands for managing Lambda container images:
