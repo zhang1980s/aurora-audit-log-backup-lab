@@ -325,7 +325,13 @@ Our performance testing with the LogDownloader Lambda function showed:
 
 - Downloading a single audit log with maximum size (100 MB) takes approximately 3 seconds
 - Uploading the log file to S3 takes approximately 1 second
+
+![trace](./picture/trace.png)
+
 - CPU utilization increases by approximately 4% during the process
+
+![CPUUtilization](./picture/CPUUtilization.png)
+
 - Downloading 12 GB of audit logs (164 files) from 2 DB instances takes 3 minutes and 38 seconds
 
 ![calculate_log_size](./picture/describe-db-logs.png)
