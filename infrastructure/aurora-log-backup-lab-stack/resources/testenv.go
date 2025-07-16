@@ -108,6 +108,585 @@ func CreateTestEnvironmentResources(ctx *pulumi.Context, cfg *config.Config, net
 		return nil, err
 	}
 
+	// Create the aurora_stress_test.sh script content
+	auroraStressTestScript := `#!/bin/bash
+# Aurora Stress Test Script
+# This script combines setup, test execution, and cleanup functionality
+# It supports targeting specific Aurora instances and controlling workload intensity
+# It also configures audit logging based on the target instance
+
+# Default parameter values
+MODE="all"
+TARGET_INSTANCE="both"
+WORKLOAD_TYPES="all"
+INTENSITY="medium"
+DURATION=180
+THREADS=20
+TABLES=20
+TABLE_SIZE=500000
+
+# Function to display usage information
+show_usage() {
+	   echo "Usage: $0 [OPTIONS]"
+	   echo
+	   echo "Options:"
+	   echo "  --mode <setup|run|cleanup|all>            Operation mode (default: all)"
+	   echo "  --target-instance <writer|reader|both>    Target specific Aurora instance(s)"
+	   echo "  --workload-type <type1,type2,...>         Comma-separated list of workload types"
+	   echo "  --intensity <low|medium|high|custom>      Workload intensity level"
+	   echo "  --duration <seconds>                      Test duration in seconds"
+	   echo "  --threads <number>                        Number of threads"
+	   echo "  --tables <number>                         Number of tables"
+	   echo "  --table-size <number>                     Rows per table"
+	   echo "  --help                                    Show this help message"
+	   echo
+	   echo "Workload types:"
+	   echo "  oltp_read_only, oltp_read_write, oltp_write_only, oltp_insert,"
+	   echo "  oltp_update_index, oltp_update_non_index, oltp_delete,"
+	   echo "  custom_queries, schema_ops, user_mgmt, all"
+	   echo
+	   echo "Examples:"
+	   echo "  $0 --mode setup --tables 50 --table-size 1000000"
+	   echo "  $0 --mode run --target-instance writer --intensity high --duration 300"
+	   echo "  $0 --mode run --target-instance reader --workload-type oltp_read_only"
+	   echo "  $0 --mode all --intensity custom --threads 100 --duration 600"
+	   echo "  $0 --mode cleanup"
+	   exit 0
+}
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+	   key="$1"
+	   case $key in
+	       --mode)
+	           MODE="$2"
+	           if [[ ! "$MODE" =~ ^(setup|run|cleanup|all)$ ]]; then
+	               echo "Error: Invalid mode. Must be 'setup', 'run', 'cleanup', or 'all'."
+	               exit 1
+	           fi
+	           shift 2
+	           ;;
+	       --target-instance)
+	           TARGET_INSTANCE="$2"
+	           if [[ ! "$TARGET_INSTANCE" =~ ^(writer|reader|both)$ ]]; then
+	               echo "Error: Invalid target instance. Must be 'writer', 'reader', or 'both'."
+	               exit 1
+	           fi
+	           shift 2
+	           ;;
+	       --workload-type)
+	           WORKLOAD_TYPES="$2"
+	           shift 2
+	           ;;
+	       --intensity)
+	           INTENSITY="$2"
+	           if [[ ! "$INTENSITY" =~ ^(low|medium|high|custom)$ ]]; then
+	               echo "Error: Invalid intensity level. Must be 'low', 'medium', 'high', or 'custom'."
+	               exit 1
+	           fi
+	           shift 2
+	           ;;
+	       --duration)
+	           DURATION="$2"
+	           if ! [[ "$DURATION" =~ ^[0-9]+$ ]]; then
+	               echo "Error: Duration must be a positive integer."
+	               exit 1
+	           fi
+	           shift 2
+	           ;;
+	       --threads)
+	           THREADS="$2"
+	           if ! [[ "$THREADS" =~ ^[0-9]+$ ]]; then
+	               echo "Error: Threads must be a positive integer."
+	               exit 1
+	           fi
+	           shift 2
+	           ;;
+	       --tables)
+	           TABLES="$2"
+	           if ! [[ "$TABLES" =~ ^[0-9]+$ ]]; then
+	               echo "Error: Tables must be a positive integer."
+	               exit 1
+	           fi
+	           shift 2
+	           ;;
+	       --table-size)
+	           TABLE_SIZE="$2"
+	           if ! [[ "$TABLE_SIZE" =~ ^[0-9]+$ ]]; then
+	               echo "Error: Table size must be a positive integer."
+	               exit 1
+	           fi
+	           shift 2
+	           ;;
+	       --help)
+	           show_usage
+	           ;;
+	       *)
+	           echo "Error: Unknown option: $1"
+	           show_usage
+	           ;;
+	   esac
+done
+
+# Set parameters based on intensity level
+if [[ "$INTENSITY" != "custom" ]]; then
+	   case $INTENSITY in
+	       low)
+	           THREADS=5
+	           TABLES=5
+	           TABLE_SIZE=100000
+	           DURATION=60
+	           echo "Using low intensity preset: threads=$THREADS, tables=$TABLES, table_size=$TABLE_SIZE, duration=$DURATION"
+	           ;;
+	       medium)
+	           THREADS=20
+	           TABLES=20
+	           TABLE_SIZE=500000
+	           DURATION=180
+	           echo "Using medium intensity preset: threads=$THREADS, tables=$TABLES, table_size=$TABLE_SIZE, duration=$DURATION"
+	           ;;
+	       high)
+	           THREADS=50
+	           TABLES=50
+	           TABLE_SIZE=1000000
+	           DURATION=300
+	           echo "Using high intensity preset: threads=$THREADS, tables=$TABLES, table_size=$TABLE_SIZE, duration=$DURATION"
+	           ;;
+	   esac
+else
+	   echo "Using custom intensity: threads=$THREADS, tables=$TABLES, table_size=$TABLE_SIZE, duration=$DURATION"
+fi
+
+# Function to check if a workload type is enabled
+is_workload_enabled() {
+	   local workload_type="$1"
+	   if [[ "$WORKLOAD_TYPES" == "all" ]]; then
+	       return 0  # All workload types are enabled
+	   fi
+	   
+	   # Check if the workload type is in the comma-separated list
+	   if [[ "$WORKLOAD_TYPES" =~ (^|,)$workload_type(,|$) ]]; then
+	       return 0  # Workload type is enabled
+	   fi
+	   
+	   return 1  # Workload type is not enabled
+}
+
+# Get AWS region using IMDSv2
+echo "Retrieving AWS region using IMDSv2..."
+TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+REGION=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/placement/region)
+
+if [ -z "$REGION" ]; then
+	   echo "Warning: Could not retrieve AWS region from instance metadata."
+	   echo "Using default region: ap-southeast-1"
+	   REGION="ap-southeast-1"
+fi
+
+echo "Using AWS region: $REGION"
+
+# Get the Aurora endpoints from AWS CLI
+echo "Getting Aurora cluster endpoints..."
+CLUSTER_ID=$(aws rds describe-db-clusters --region $REGION --query "DBClusters[?Engine=='aurora-mysql'].DBClusterIdentifier" --output text | head -n 1)
+
+if [ -z "$CLUSTER_ID" ]; then
+	   echo "Error: Could not find any Aurora MySQL clusters in region $REGION."
+	   echo "Please ensure the Aurora cluster is running and try again."
+	   exit 1
+fi
+
+# Get both writer and reader endpoints
+WRITER_ENDPOINT=$(aws rds describe-db-clusters --region $REGION --db-cluster-identifier $CLUSTER_ID --query "DBClusters[0].Endpoint" --output text)
+READER_ENDPOINT=$(aws rds describe-db-clusters --region $REGION --db-cluster-identifier $CLUSTER_ID --query "DBClusters[0].ReaderEndpoint" --output text)
+
+# Fallback to SSM Parameter Store for writer endpoint if AWS CLI fails
+if [ -z "$WRITER_ENDPOINT" ]; then
+	   echo "Falling back to SSM Parameter Store for writer endpoint..."
+	   WRITER_ENDPOINT=$(aws ssm get-parameter --name "/aurora-audit-log-lab/aurora-endpoint" --region $REGION --query "Parameter.Value" --output text)
+fi
+
+# Get S3 bucket name from SSM Parameter Store
+BUCKET_NAME=$(aws ssm get-parameter --name "/aurora-audit-log-lab/s3-bucket-name" --region $REGION --query "Parameter.Value" --output text 2>/dev/null || echo "zzhe-aurora-audit-log-lab-bucket")
+
+echo "Aurora writer endpoint: $WRITER_ENDPOINT"
+echo "Aurora reader endpoint: $READER_ENDPOINT"
+echo "S3 bucket name: $BUCKET_NAME"
+
+# Set passwords for authentication
+echo "Setting passwords for authentication..."
+export ADMIN_PASSWORD="Password123!"
+export SYSBENCH_PASSWORD="sysbench123"
+
+# Create test directory
+TEST_DIR=$(mktemp -d)
+echo "Using temporary directory: $TEST_DIR"
+
+# Function to setup the database and prepare tables
+setup_database() {
+	   echo "Setting up sysbench test database..."
+	   
+	   # Create database and user
+	   mysql -h $WRITER_ENDPOINT -u admin -p$ADMIN_PASSWORD << 'EOFMYSQL'
+CREATE DATABASE IF NOT EXISTS sysbench_test;
+CREATE USER IF NOT EXISTS 'sysbench'@'%' IDENTIFIED BY 'sysbench123';
+GRANT ALL PRIVILEGES ON sysbench_test.* TO 'sysbench'@'%';
+FLUSH PRIVILEGES;
+EOFMYSQL
+	   
+	   # Prepare sysbench tables with parameters from command line
+	   echo "Preparing sysbench tables ($TABLES tables, $TABLE_SIZE rows each)..."
+	   sysbench oltp_read_write \
+	       --db-driver=mysql \
+	       --mysql-host=$WRITER_ENDPOINT \
+	       --mysql-user=sysbench \
+	       --mysql-password=$SYSBENCH_PASSWORD \
+	       --mysql-db=sysbench_test \
+	       --tables=$TABLES \
+	       --table-size=$TABLE_SIZE \
+	       --threads=$THREADS \
+	       prepare
+	   
+	   echo "Sysbench tables prepared successfully!"
+}
+
+# Function to run sysbench test with specified endpoint
+run_sysbench_test() {
+	   local test_type=$1
+	   local endpoint=$2
+	   local node_type=$3
+	   
+	   # Skip if this node type is not targeted
+	   if [[ "$TARGET_INSTANCE" != "both" && "$TARGET_INSTANCE" != "$node_type" ]]; then
+	       echo "Skipping $test_type workload on $node_type node (not targeted)"
+	       return
+	   fi
+	   
+	   echo "Running $test_type workload on $node_type node ($endpoint)..."
+	   echo "Parameters: threads=$THREADS, tables=$TABLES, table_size=$TABLE_SIZE, duration=$DURATION seconds"
+	   
+	   sysbench $test_type \
+	       --db-driver=mysql \
+	       --mysql-host=$endpoint \
+	       --mysql-user=sysbench \
+	       --mysql-password=$SYSBENCH_PASSWORD \
+	       --mysql-db=sysbench_test \
+	       --tables=$TABLES \
+	       --table-size=$TABLE_SIZE \
+	       --threads=$THREADS \
+	       --time=$DURATION \
+	       run
+	       
+	   echo "$test_type workload on $node_type node completed."
+}
+
+# Function to run custom SQL queries
+run_custom_queries() {
+	   local endpoint=$1
+	   local node_type=$2
+	   local iterations=$3
+	   
+	   # Skip if this node type is not targeted
+	   if [[ "$TARGET_INSTANCE" != "both" && "$TARGET_INSTANCE" != "$node_type" ]]; then
+	       echo "Skipping custom queries on $node_type node (not targeted)"
+	       return
+	   fi
+	   
+	   echo "Running custom queries on $node_type node ($endpoint)..."
+	   
+	   for i in $(seq 1 $iterations); do
+	       echo "Iteration $i of $iterations"
+	       mysql -h $endpoint -u sysbench -p$SYSBENCH_PASSWORD sysbench_test -e "
+	           SELECT COUNT(*) FROM sbtest1;
+	           SELECT AVG(k) FROM sbtest1;
+	           SELECT MAX(k), MIN(k) FROM sbtest1;
+	           SELECT COUNT(DISTINCT k) FROM sbtest1;
+	           SELECT COUNT(*) FROM sbtest1 WHERE k BETWEEN 1 AND 10000;
+	       "
+	   done
+	   
+	   echo "Custom queries on $node_type node completed."
+}
+
+# Function to cleanup resources
+cleanup_resources() {
+	   echo "Cleaning up resources..."
+	   
+	   # Reset audit logging configuration to default (enabled on all instances)
+	   echo "Resetting audit logging configuration to default..."
+	   # Enable audit logging on writer instance
+	   echo "Enabling audit logging on writer instance..."
+	   mysql -h $WRITER_ENDPOINT -u admin -p$ADMIN_PASSWORD << 'EOFWRITER'
+-- Enable audit logging on writer instance
+SET GLOBAL server_audit_logging = 1;
+-- Apply the configuration
+FLUSH LOGS;
+EOFWRITER
+	   # Enable audit logging on reader instance
+	   echo "Enabling audit logging on reader instance..."
+	   mysql -h $READER_ENDPOINT -u admin -p$ADMIN_PASSWORD << 'EOFREADER'
+-- Enable audit logging on reader instance
+SET GLOBAL server_audit_logging = 1;
+-- Apply the configuration
+FLUSH LOGS;
+EOFREADER
+	   
+	   # Drop database and user
+	   mysql -h $WRITER_ENDPOINT -u admin -p$ADMIN_PASSWORD << 'EOFCLEANUP'
+-- Drop all tables in sysbench_test database
+DROP DATABASE IF EXISTS sysbench_test;
+
+-- Drop sysbench user
+DROP USER IF EXISTS 'sysbench'@'%';
+
+-- Drop test users if they exist
+DROP USER IF EXISTS 'audit_user1'@'%';
+DROP USER IF EXISTS 'audit_user2'@'%';
+DROP USER IF EXISTS 'audit_user3'@'%';
+DROP USER IF EXISTS 'test_user'@'%';
+EOFCLEANUP
+	   
+	   echo "Cleanup completed successfully!"
+}
+
+# Function to run tests
+run_tests() {
+	   echo "Running stress tests..."
+	   
+	   # Configure audit logging based on target instance
+	   if [[ "$TARGET_INSTANCE" == "writer" ]]; then
+	       echo "Configuring audit logging for writer instance only..."
+	       # Enable audit logging on writer instance
+	       mysql -h $WRITER_ENDPOINT -u admin -p$ADMIN_PASSWORD << 'EOFAUDIT'
+-- Enable audit logging on writer instance
+SET GLOBAL server_audit_logging = 1;
+-- Apply the configuration
+FLUSH LOGS;
+EOFAUDIT
+	       # Explicitly disable audit logging on reader instance
+	       echo "Explicitly disabling audit logging on reader instance..."
+	       mysql -h $READER_ENDPOINT -u admin -p$ADMIN_PASSWORD << 'EOFREADER'
+-- Disable audit logging on reader instance
+SET GLOBAL server_audit_logging = 0;
+-- Apply the configuration
+FLUSH LOGS;
+EOFREADER
+	   elif [[ "$TARGET_INSTANCE" == "reader" ]]; then
+	       echo "Configuring audit logging for reader instance only..."
+	       # Explicitly disable audit logging on writer instance
+	       mysql -h $WRITER_ENDPOINT -u admin -p$ADMIN_PASSWORD << 'EOFWRITER'
+-- Disable audit logging on writer instance
+SET GLOBAL server_audit_logging = 0;
+-- Apply the configuration
+FLUSH LOGS;
+EOFWRITER
+	       # Enable audit logging on reader instance
+	       echo "Enabling audit logging on reader instance..."
+	       mysql -h $READER_ENDPOINT -u admin -p$ADMIN_PASSWORD << 'EOFREADER'
+-- Enable audit logging on reader instance
+SET GLOBAL server_audit_logging = 1;
+-- Apply the configuration
+FLUSH LOGS;
+EOFREADER
+	   else
+	       echo "Configuring audit logging for both instances..."
+	       # Enable audit logging on writer instance
+	       echo "Enabling audit logging on writer instance..."
+	       mysql -h $WRITER_ENDPOINT -u admin -p$ADMIN_PASSWORD << 'EOFWRITER'
+-- Enable audit logging on writer instance
+SET GLOBAL server_audit_logging = 1;
+-- Apply the configuration
+FLUSH LOGS;
+EOFWRITER
+	       # Enable audit logging on reader instance
+	       echo "Enabling audit logging on reader instance..."
+	       mysql -h $READER_ENDPOINT -u admin -p$ADMIN_PASSWORD << 'EOFREADER'
+-- Enable audit logging on reader instance
+SET GLOBAL server_audit_logging = 1;
+-- Apply the configuration
+FLUSH LOGS;
+EOFREADER
+	   fi
+	   
+	   # Check if tables exist
+	   AVAILABLE_TABLES=$(mysql -h $WRITER_ENDPOINT -u sysbench -p$SYSBENCH_PASSWORD -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='sysbench_test' AND table_name LIKE 'sbtest%';" 2>/dev/null || echo "0")
+	   
+	   if [ -z "$AVAILABLE_TABLES" ] || [ "$AVAILABLE_TABLES" -eq "0" ]; then
+	       echo "Error: No sysbench tables found. Please run with --mode setup first."
+	       exit 1
+	   fi
+	   
+	   if [ "$TABLES" -gt "$AVAILABLE_TABLES" ]; then
+	       echo "Warning: Requested $TABLES tables but only $AVAILABLE_TABLES are available."
+	       echo "Adjusting tables parameter to $AVAILABLE_TABLES."
+	       TABLES=$AVAILABLE_TABLES
+	   fi
+	   
+	   # Run authentication tests if enabled
+	   if is_workload_enabled "auth_tests"; then
+	       echo "Running authentication tests..."
+	       
+	       if [[ "$TARGET_INSTANCE" == "both" || "$TARGET_INSTANCE" == "writer" ]]; then
+	           echo "1. Testing admin authentication on writer node..."
+	           mysql -h $WRITER_ENDPOINT -u admin -p$ADMIN_PASSWORD -e "SELECT 'Admin authentication on writer node successful';"
+	           
+	           echo "2. Testing sysbench user authentication on writer node..."
+	           mysql -h $WRITER_ENDPOINT -u sysbench -p$SYSBENCH_PASSWORD -e "SELECT 'Sysbench user authentication on writer node successful';"
+	       fi
+	       
+	       if [[ "$TARGET_INSTANCE" == "both" || "$TARGET_INSTANCE" == "reader" ]]; then
+	           echo "3. Testing sysbench user authentication on reader node..."
+	           mysql -h $READER_ENDPOINT -u sysbench -p$SYSBENCH_PASSWORD -e "SELECT 'Sysbench user authentication on reader node successful';"
+	       fi
+	       
+	       if [[ "$TARGET_INSTANCE" == "both" || "$TARGET_INSTANCE" == "writer" ]]; then
+	           echo "4. Testing invalid credentials (should fail)..."
+	           mysql -h $WRITER_ENDPOINT -u admin -p"wrong_password" -e "SELECT 1;" || echo "Invalid credentials test passed (expected failure)"
+	       fi
+	   fi
+	   
+	   # Run OLTP workload tests
+	   echo "Running OLTP workload tests based on selected types..."
+	   
+	   # Read-only workload
+	   if is_workload_enabled "oltp_read_only"; then
+	       run_sysbench_test oltp_read_only $READER_ENDPOINT "reader"
+	   fi
+	   
+	   # Read-write workload
+	   if is_workload_enabled "oltp_read_write"; then
+	       run_sysbench_test oltp_read_write $WRITER_ENDPOINT "writer"
+	   fi
+	   
+	   # Write-only workload
+	   if is_workload_enabled "oltp_write_only"; then
+	       run_sysbench_test oltp_write_only $WRITER_ENDPOINT "writer"
+	   fi
+	   
+	   # Insert-only workload
+	   if is_workload_enabled "oltp_insert"; then
+	       run_sysbench_test oltp_insert $WRITER_ENDPOINT "writer"
+	   fi
+	   
+	   # Update indexed columns workload
+	   if is_workload_enabled "oltp_update_index"; then
+	       run_sysbench_test oltp_update_index $WRITER_ENDPOINT "writer"
+	   fi
+	   
+	   # Update non-indexed columns workload
+	   if is_workload_enabled "oltp_update_non_index"; then
+	       run_sysbench_test oltp_update_non_index $WRITER_ENDPOINT "writer"
+	   fi
+	   
+	   # Delete operations workload
+	   if is_workload_enabled "oltp_delete"; then
+	       run_sysbench_test oltp_delete $WRITER_ENDPOINT "writer"
+	   fi
+	   
+	   # Run custom queries if enabled
+	   if is_workload_enabled "custom_queries"; then
+	       # Calculate iterations based on intensity
+	       READER_ITERATIONS=$((THREADS / 5))
+	       WRITER_ITERATIONS=$((THREADS / 10))
+	       
+	       # Ensure at least one iteration
+	       [[ $READER_ITERATIONS -lt 1 ]] && READER_ITERATIONS=1
+	       [[ $WRITER_ITERATIONS -lt 1 ]] && WRITER_ITERATIONS=1
+	       
+	       run_custom_queries $READER_ENDPOINT "reader" $READER_ITERATIONS
+	       run_custom_queries $WRITER_ENDPOINT "writer" $WRITER_ITERATIONS
+	   fi
+	   
+	   # Run schema modification tests on writer node if enabled
+	   if is_workload_enabled "schema_ops" && [[ "$TARGET_INSTANCE" == "both" || "$TARGET_INSTANCE" == "writer" ]]; then
+	       echo "Running schema modification tests on writer node..."
+	       mysql -h $WRITER_ENDPOINT -u admin -p$ADMIN_PASSWORD << 'EOFSCHEMA'
+-- Create test tables
+CREATE TABLE IF NOT EXISTS sysbench_test.audit_test1 (
+	   id INT AUTO_INCREMENT PRIMARY KEY,
+	   name VARCHAR(255),
+	   description TEXT,
+	   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Insert some data
+INSERT INTO sysbench_test.audit_test1 (name, description)
+VALUES
+	   ('Test 1', 'Description for test 1'),
+	   ('Test 2', 'Description for test 2'),
+	   ('Test 3', 'Description for test 3');
+
+-- Modify schema multiple times
+ALTER TABLE sysbench_test.audit_test1 ADD COLUMN status VARCHAR(50);
+ALTER TABLE sysbench_test.audit_test1 ADD INDEX idx_name (name);
+ALTER TABLE sysbench_test.audit_test1 ADD COLUMN updated_at TIMESTAMP;
+UPDATE sysbench_test.audit_test1 SET status = 'active';
+ALTER TABLE sysbench_test.audit_test1 MODIFY COLUMN status VARCHAR(100);
+ALTER TABLE sysbench_test.audit_test1 DROP COLUMN updated_at;
+DROP TABLE sysbench_test.audit_test1;
+EOFSCHEMA
+	   fi
+	   
+	   # Run user management tests for additional DCL audit logs if enabled
+	   if is_workload_enabled "user_mgmt" && [[ "$TARGET_INSTANCE" == "both" || "$TARGET_INSTANCE" == "writer" ]]; then
+	       echo "Running user management tests..."
+	       mysql -h $WRITER_ENDPOINT -u admin -p$ADMIN_PASSWORD << 'EOFDCL'
+-- Create multiple test users
+CREATE USER IF NOT EXISTS 'audit_user1'@'%' IDENTIFIED BY 'test123';
+CREATE USER IF NOT EXISTS 'audit_user2'@'%' IDENTIFIED BY 'test123';
+CREATE USER IF NOT EXISTS 'audit_user3'@'%' IDENTIFIED BY 'test123';
+
+-- Grant different privileges
+GRANT SELECT ON sysbench_test.* TO 'audit_user1'@'%';
+GRANT INSERT, UPDATE ON sysbench_test.* TO 'audit_user2'@'%';
+GRANT ALL PRIVILEGES ON sysbench_test.* TO 'audit_user3'@'%';
+
+-- Modify privileges
+REVOKE SELECT ON sysbench_test.* FROM 'audit_user1'@'%';
+GRANT SELECT ON sysbench_test.* TO 'audit_user1'@'%';
+REVOKE INSERT ON sysbench_test.* FROM 'audit_user2'@'%';
+
+-- Drop users
+DROP USER 'audit_user1'@'%';
+DROP USER 'audit_user2'@'%';
+DROP USER 'audit_user3'@'%';
+EOFDCL
+	   fi
+	   
+	   echo "All tests completed successfully!"
+	   echo "Workload has been generated on targeted instances:"
+	   if [[ "$TARGET_INSTANCE" == "both" || "$TARGET_INSTANCE" == "writer" ]]; then
+	       echo "Writer endpoint: $WRITER_ENDPOINT"
+	   fi
+	   if [[ "$TARGET_INSTANCE" == "both" || "$TARGET_INSTANCE" == "reader" ]]; then
+	       echo "Reader endpoint: $READER_ENDPOINT"
+	   fi
+}
+
+# Execute based on selected mode
+if [[ "$MODE" == "setup" || "$MODE" == "all" ]]; then
+	   setup_database
+fi
+
+if [[ "$MODE" == "run" || "$MODE" == "all" ]]; then
+	   run_tests
+fi
+
+if [[ "$MODE" == "cleanup" || "$MODE" == "all" ]]; then
+	   cleanup_resources
+fi
+`
+
+	// Upload the aurora_stress_test.sh script to S3
+	_, err = s3.NewBucketObject(ctx, "aurora-stress-test-script", &s3.BucketObjectArgs{
+		Bucket:      auditLogBucket.ID(),
+		Key:         pulumi.String("scripts/aurora_stress_test.sh"),
+		Content:     pulumi.String(auroraStressTestScript),
+		ContentType: pulumi.String("text/x-shellscript"),
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	// Create bucket policy to allow access from Aurora via VPC Endpoint
 	_, err = s3.NewBucketPolicy(ctx, "audit-logs-bucket-policy", &s3.BucketPolicyArgs{
 		Bucket: auditLogBucket.ID(),
@@ -476,308 +1055,44 @@ make install
 # Create directory for scripts
 mkdir -p /home/ec2-user/scripts
 
-# Create sysbench setup script
-cat > /home/ec2-user/scripts/setup_sysbench.sh << 'EOF'
-#!/bin/bash
-# Setup sysbench test database
-# This script will be executed manually after the instance is up
-
 # Get AWS region using IMDSv2
-TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
-REGION=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/placement/region)
-
-# Get the Aurora endpoint from SSM Parameter Store
-CLUSTER_ENDPOINT=$(aws ssm get-parameter --name "/aurora-audit-log-lab/aurora-endpoint" --region $REGION --query "Parameter.Value" --output text)
-
-# Fallback to AWS CLI if Parameter Store fails
-if [ -z "$CLUSTER_ENDPOINT" ]; then
-    echo "Could not get Aurora endpoint from Parameter Store, falling back to AWS CLI..."
-    CLUSTER_ENDPOINT=$(aws rds describe-db-clusters --region $REGION --query "DBClusters[?Engine=='aurora-mysql'].Endpoint" --output text | head -n 1)
-fi
-
-# Connect using the master password
-echo "Connecting to Aurora using master password..."
-MASTER_PASSWORD="Password123!"
-
-# Create test database and user
-mysql -h $CLUSTER_ENDPOINT -u admin -p$MASTER_PASSWORD << 'EOFMYSQL'
-CREATE DATABASE IF NOT EXISTS sysbench_test;
-CREATE USER IF NOT EXISTS 'sysbench'@'%' IDENTIFIED BY 'sysbench123';
-GRANT ALL PRIVILEGES ON sysbench_test.* TO 'sysbench'@'%';
-FLUSH PRIVILEGES;
-EOFMYSQL
-
-# Prepare sysbench OLTP tables with increased size
-echo "Preparing sysbench tables (20 tables, 500,000 rows each)..."
-sysbench oltp_read_write --db-driver=mysql --mysql-host=$CLUSTER_ENDPOINT --mysql-user=sysbench --mysql-password='sysbench123' --mysql-db=sysbench_test --tables=20 --table-size=500000 --threads=20 prepare
-
-echo "Sysbench tables prepared successfully!"
-EOF
-
-# Create enhanced test execution script
-cat > /home/ec2-user/scripts/test_audit_logs.sh << 'EOF'
-#!/bin/bash
-# Enhanced script to run sysbench tests and verify audit logs
-# This script supports targeting specific Aurora nodes and generates more audit logs
-
-# Get AWS region using IMDSv2
-echo "Retrieving AWS region using IMDSv2..."
 TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
 REGION=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/placement/region)
 
 if [ -z "$REGION" ]; then
-    echo "Warning: Could not retrieve AWS region from instance metadata."
-    echo "Using default region: ap-southeast-1"
-    REGION="ap-southeast-1"
+	   echo "Warning: Could not retrieve AWS region from instance metadata."
+	   echo "Using default region: ap-southeast-1"
+	   REGION="ap-southeast-1"
 fi
 
 echo "Using AWS region: $REGION"
 
-# Get the Aurora endpoints from AWS CLI
-echo "Getting Aurora cluster endpoints..."
-CLUSTER_ID=$(aws rds describe-db-clusters --region $REGION --query "DBClusters[?Engine=='aurora-mysql'].DBClusterIdentifier" --output text | head -n 1)
+# Configure AWS CLI to use VPC endpoints for S3
+mkdir -p ~/.aws
+cat > ~/.aws/config << EOF
+[default]
+region = $REGION
+s3 =
+	   use_accelerate_endpoint = false
+	   use_dualstack_endpoint = false
+	   addressing_style = virtual
+	   use_arnregion = false
+EOF
 
-if [ -z "$CLUSTER_ID" ]; then
-    echo "Error: Could not find any Aurora MySQL clusters in region $REGION."
-    echo "Please ensure the Aurora cluster is running and try again."
-    exit 1
-fi
+# Get S3 bucket name from SSM Parameter Store
+BUCKET_NAME=$(aws ssm get-parameter --name "/aurora-audit-log-lab/s3-bucket-name" --region $REGION --query "Parameter.Value" --output text 2>/dev/null || echo "zzhe-aurora-audit-log-lab-bucket")
 
-# Get both writer and reader endpoints
-WRITER_ENDPOINT=$(aws rds describe-db-clusters --region $REGION --db-cluster-identifier $CLUSTER_ID --query "DBClusters[0].Endpoint" --output text)
-READER_ENDPOINT=$(aws rds describe-db-clusters --region $REGION --db-cluster-identifier $CLUSTER_ID --query "DBClusters[0].ReaderEndpoint" --output text)
-
-# Fallback to SSM Parameter Store for writer endpoint if AWS CLI fails
-if [ -z "$WRITER_ENDPOINT" ]; then
-    echo "Falling back to SSM Parameter Store for writer endpoint..."
-    WRITER_ENDPOINT=$(aws ssm get-parameter --name "/aurora-audit-log-lab/aurora-endpoint" --region $REGION --query "Parameter.Value" --output text)
-fi
-
-
-echo "Aurora writer endpoint: $WRITER_ENDPOINT"
-echo "Aurora reader endpoint: $READER_ENDPOINT"
 echo "S3 bucket name: $BUCKET_NAME"
 
-# Set passwords for authentication
-echo "Setting passwords for authentication..."
-export ADMIN_PASSWORD="Password123!"
-export SYSBENCH_PASSWORD="sysbench123"
+# Download the aurora_stress_test.sh script from S3 using VPC endpoint
+echo "Downloading aurora_stress_test.sh script from S3 via VPC endpoint..."
+aws s3 cp s3://$BUCKET_NAME/scripts/aurora_stress_test.sh /home/ec2-user/scripts/aurora_stress_test.sh --region $REGION
 
-# Create test directory
-TEST_DIR=$(mktemp -d)
-echo "Using temporary directory: $TEST_DIR"
+# Make the script executable
+chmod +x /home/ec2-user/scripts/aurora_stress_test.sh
 
-# Function to run sysbench test with specified endpoint
-run_sysbench_test() {
-    local test_type=$1
-    local endpoint=$2
-    local node_type=$3
-    local threads=$4
-    local tables=$5
-    local table_size=$6
-    local duration=$7
-    
-    echo "Running $test_type workload on $node_type node ($endpoint)..."
-    echo "Parameters: threads=$threads, tables=$tables, table_size=$table_size, duration=$duration seconds"
-    
-    sysbench $test_type \
-        --db-driver=mysql \
-        --mysql-host=$endpoint \
-        --mysql-user=sysbench \
-        --mysql-password=$SYSBENCH_PASSWORD \
-        --mysql-db=sysbench_test \
-        --tables=$tables \
-        --table-size=$table_size \
-        --threads=$threads \
-        --time=$duration \
-        run
-        
-    echo "$test_type workload on $node_type node completed."
-}
-
-# Function to run custom SQL queries
-run_custom_queries() {
-    local endpoint=$1
-    local node_type=$2
-    local iterations=$3
-    
-    echo "Running custom queries on $node_type node ($endpoint)..."
-    
-    for i in $(seq 1 $iterations); do
-        echo "Iteration $i of $iterations"
-        mysql -h $endpoint -u sysbench -p$SYSBENCH_PASSWORD sysbench_test -e "
-            SELECT COUNT(*) FROM sbtest1;
-            SELECT AVG(k) FROM sbtest1;
-            SELECT MAX(k), MIN(k) FROM sbtest1;
-            SELECT COUNT(DISTINCT k) FROM sbtest1;
-            SELECT COUNT(*) FROM sbtest1 WHERE k BETWEEN 1 AND 10000;
-        "
-    done
-    
-    echo "Custom queries on $node_type node completed."
-}
-
-# Run authentication tests
-echo "Running authentication tests..."
-echo "1. Testing admin authentication on writer node..."
-mysql -h $WRITER_ENDPOINT -u admin -p$ADMIN_PASSWORD -e "SELECT 'Admin authentication on writer node successful';"
-
-echo "2. Testing sysbench user authentication on writer node..."
-mysql -h $WRITER_ENDPOINT -u sysbench -p$SYSBENCH_PASSWORD -e "SELECT 'Sysbench user authentication on writer node successful';"
-
-echo "3. Testing sysbench user authentication on reader node..."
-mysql -h $READER_ENDPOINT -u sysbench -p$SYSBENCH_PASSWORD -e "SELECT 'Sysbench user authentication on reader node successful';"
-
-echo "4. Testing invalid credentials (should fail)..."
-mysql -h $WRITER_ENDPOINT -u admin -p"wrong_password" -e "SELECT 1;" || echo "Invalid credentials test passed (expected failure)"
-
-# Run OLTP workload tests with increased load
-echo "Running enhanced OLTP workload tests..."
-
-# Read-only workload on reader node (higher load)
-run_sysbench_test oltp_read_only $READER_ENDPOINT "reader" 20 20 500000 180
-
-# Read-write workload on writer node (higher load)
-run_sysbench_test oltp_read_write $WRITER_ENDPOINT "writer" 20 20 500000 180
-
-# Write-only workload on writer node (higher load)
-run_sysbench_test oltp_write_only $WRITER_ENDPOINT "writer" 20 20 500000 180
-
-# Run custom queries for additional workload
-run_custom_queries $READER_ENDPOINT "reader" 20
-run_custom_queries $WRITER_ENDPOINT "writer" 10
-
-# Run more intensive schema modification tests on writer node
-echo "Running intensive schema modification tests on writer node..."
-mysql -h $WRITER_ENDPOINT -u admin -p$ADMIN_PASSWORD << 'EOFSCHEMA'
--- Create test tables
-CREATE TABLE IF NOT EXISTS sysbench_test.audit_test1 (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(255),
-    description TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- Insert some data
-INSERT INTO sysbench_test.audit_test1 (name, description)
-VALUES
-    ('Test 1', 'Description for test 1'),
-    ('Test 2', 'Description for test 2'),
-    ('Test 3', 'Description for test 3');
-
--- Modify schema multiple times
-ALTER TABLE sysbench_test.audit_test1 ADD COLUMN status VARCHAR(50);
-ALTER TABLE sysbench_test.audit_test1 ADD INDEX idx_name (name);
-ALTER TABLE sysbench_test.audit_test1 ADD COLUMN updated_at TIMESTAMP;
-UPDATE sysbench_test.audit_test1 SET status = 'active';
-ALTER TABLE sysbench_test.audit_test1 MODIFY COLUMN status VARCHAR(100);
-ALTER TABLE sysbench_test.audit_test1 DROP COLUMN updated_at;
-DROP TABLE sysbench_test.audit_test1;
-EOFSCHEMA
-
-# Run more user management tests for additional DCL audit logs
-echo "Running enhanced user management tests..."
-mysql -h $WRITER_ENDPOINT -u admin -p$ADMIN_PASSWORD << 'EOFDCL'
--- Create multiple test users
-CREATE USER IF NOT EXISTS 'audit_user1'@'%' IDENTIFIED BY 'test123';
-CREATE USER IF NOT EXISTS 'audit_user2'@'%' IDENTIFIED BY 'test123';
-CREATE USER IF NOT EXISTS 'audit_user3'@'%' IDENTIFIED BY 'test123';
-
--- Grant different privileges
-GRANT SELECT ON sysbench_test.* TO 'audit_user1'@'%';
-GRANT INSERT, UPDATE ON sysbench_test.* TO 'audit_user2'@'%';
-GRANT ALL PRIVILEGES ON sysbench_test.* TO 'audit_user3'@'%';
-
--- Modify privileges
-REVOKE SELECT ON sysbench_test.* FROM 'audit_user1'@'%';
-GRANT SELECT ON sysbench_test.* TO 'audit_user1'@'%';
-REVOKE INSERT ON sysbench_test.* FROM 'audit_user2'@'%';
-
--- Drop users
-DROP USER 'audit_user1'@'%';
-DROP USER 'audit_user2'@'%';
-DROP USER 'audit_user3'@'%';
-EOFDCL
-
-echo "All tests completed successfully!"
-echo "Workload has been generated on both writer and reader nodes."
-echo "Writer endpoint: $WRITER_ENDPOINT"
-echo "Reader endpoint: $READER_ENDPOINT"
-EOF
-
-# Create cleanup script
-cat > /home/ec2-user/scripts/cleanup_sysbench.sh << 'EOF'
-#!/bin/bash
-# Cleanup script for sysbench test database and user
-# This script removes all resources created by setup_sysbench.sh
-
-# Get AWS region using IMDSv2
-echo "Retrieving AWS region using IMDSv2..."
-TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
-REGION=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/placement/region)
-
-if [ -z "$REGION" ]; then
-    echo "Warning: Could not retrieve AWS region from instance metadata."
-    echo "Using default region: ap-southeast-1"
-    REGION="ap-southeast-1"
-fi
-
-echo "Using AWS region: $REGION"
-
-# Get the Aurora endpoint from SSM Parameter Store
-echo "Getting Aurora cluster endpoint from SSM Parameter Store..."
-CLUSTER_ENDPOINT=$(aws ssm get-parameter --name "/aurora-audit-log-lab/aurora-endpoint" --region $REGION --query "Parameter.Value" --output text)
-
-# Fallback to AWS CLI if Parameter Store fails
-if [ -z "$CLUSTER_ENDPOINT" ]; then
-    echo "Error: Could not get Aurora endpoint from SSM Parameter Store."
-    echo "Falling back to AWS CLI to find Aurora cluster..."
-    
-    # Fallback to finding the cluster using AWS CLI
-    CLUSTER_ENDPOINT=$(aws rds describe-db-clusters --region $REGION --query "DBClusters[?Engine=='aurora-mysql'].Endpoint" --output text | head -n 1)
-    
-    if [ -z "$CLUSTER_ENDPOINT" ]; then
-        echo "Error: Could not find any Aurora MySQL clusters in region $REGION."
-        echo "Please ensure the Aurora cluster is running and try again."
-        exit 1
-    fi
-fi
-
-echo "Aurora endpoint: $CLUSTER_ENDPOINT"
-
-# Connect using the master password
-echo "Connecting to Aurora using master password..."
-MASTER_PASSWORD="Password123!"
-
-# Drop database and user
-echo "Dropping sysbench_test database and sysbench user..."
-mysql -h $CLUSTER_ENDPOINT -u admin -p$MASTER_PASSWORD << 'EOFCLEANUP'
--- Drop all tables in sysbench_test database
-DROP DATABASE IF EXISTS sysbench_test;
-
--- Drop sysbench user
-DROP USER IF EXISTS 'sysbench'@'%';
-
--- Drop test users if they exist (in case test_audit_logs.sh was interrupted)
-DROP USER IF EXISTS 'audit_user1'@'%';
-DROP USER IF EXISTS 'audit_user2'@'%';
-DROP USER IF EXISTS 'audit_user3'@'%';
-DROP USER IF EXISTS 'test_user'@'%';
-EOFCLEANUP
-
-if [ $? -eq 0 ]; then
-    echo "✅ Cleanup completed successfully!"
-    echo "✅ Dropped sysbench_test database"
-    echo "✅ Dropped sysbench user"
-    echo "✅ Dropped any test users"
-else
-    echo "❌ Error: Cleanup failed."
-    exit 1
-fi
-EOF
-
-# Make cleanup script executable
-chmod +x /home/ec2-user/scripts/cleanup_sysbench.sh
+echo "Aurora stress test script downloaded and ready to use."
+echo "You can run it with: /home/ec2-user/scripts/aurora_stress_test.sh --help"
 `
 
 	// Create EC2 instance with explicit dependencies on Aurora cluster and instances

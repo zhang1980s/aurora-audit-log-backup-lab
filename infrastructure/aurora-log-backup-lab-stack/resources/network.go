@@ -202,9 +202,19 @@ func CreateNetworkResources(ctx *pulumi.Context, cfg *config.Config) (*NetworkRe
 		return nil, err
 	}
 
-	// Associate S3 VPC Endpoint with private route table only
+	// Associate S3 VPC Endpoint with private route table
 	_, err = ec2.NewVpcEndpointRouteTableAssociation(ctx, "s3-endpoint-private-rt", &ec2.VpcEndpointRouteTableAssociationArgs{
 		RouteTableId:  privateRouteTable.ID(),
+		VpcEndpointId: s3VpcEndpoint.ID(),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Associate S3 VPC Endpoint with public route table as well
+	// This allows EC2 instances in the public subnet to access S3 via the VPC endpoint
+	_, err = ec2.NewVpcEndpointRouteTableAssociation(ctx, "s3-endpoint-public-rt", &ec2.VpcEndpointRouteTableAssociationArgs{
+		RouteTableId:  publicRouteTable.ID(),
 		VpcEndpointId: s3VpcEndpoint.ID(),
 	})
 	if err != nil {

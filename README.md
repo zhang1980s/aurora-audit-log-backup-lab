@@ -152,15 +152,31 @@ After deployment, you can connect to the EC2 instance and run the provided test 
    ssh -i your-key.pem ec2-user@<ec2-public-ip>
    ```
 
-2. Set up the test database:
+2. Run the Aurora stress test script:
    ```bash
    cd ~/scripts
-   ./setup_sysbench.sh
+   ./aurora_stress_test.sh
    ```
 
-3. Run the audit log tests:
+   The script supports various options:
    ```bash
-   ./test_audit_logs.sh
+   # Show help information
+   ./aurora_stress_test.sh --help
+   
+   # Setup the database with 50 tables of 1 million rows each
+   ./aurora_stress_test.sh --mode setup --tables 50 --table-size 1000000
+   
+   # Run high-intensity tests on the writer node only (audit logs will only appear on writer)
+   ./aurora_stress_test.sh --mode run --target-instance writer --intensity high
+   
+   # Run read-only tests on the reader node (audit logs will only appear on reader)
+   ./aurora_stress_test.sh --mode run --target-instance reader --workload-type oltp_read_only
+   
+   # Run custom intensity tests on both nodes (audit logs will appear on both instances)
+   ./aurora_stress_test.sh --mode run --intensity custom --threads 100 --duration 600
+   
+   # Clean up all resources
+   ./aurora_stress_test.sh --mode cleanup
    ```
 
 4. Calculate log sizes for one or multiple DB instances using the Go application:
@@ -339,6 +355,43 @@ Our performance testing with the LogDownloader Lambda function showed:
 ![calculate_ddb_log_size](./picture/time-diff-ddb.png)
 
 These metrics demonstrate that the solution is efficient and can handle the maximum log file size within reasonable time and resource constraints, even when processing multiple log files in parallel. The solution also scales well when processing large volumes of log files across multiple DB instances.
+
+### Enhanced Aurora Stress Testing
+
+The project now includes an enhanced unified stress testing script (`aurora_stress_test.sh`) that combines setup, test execution, and cleanup functionality with the following features:
+
+- **Unified Workflow**: Single script with different execution modes:
+  ```bash
+  ./aurora_stress_test.sh --mode <setup|run|cleanup|all>
+  ```
+
+- **Instance Targeting**: Direct stress tests to specific Aurora instances and control audit logging:
+  ```bash
+  ./aurora_stress_test.sh --target-instance <writer|reader|both>
+  ```
+  - When targeting a specific instance (writer or reader), audit logs will only be generated on that instance
+  - When targeting both instances, audit logs will be generated on both instances
+  - Audit logging settings are automatically reset during cleanup
+
+- **Workload Type Selection**: Run specific types of tests:
+  ```bash
+  ./aurora_stress_test.sh --workload-type oltp_read_only,oltp_read_write
+  ```
+
+- **Workload Intensity Control**: Predefined intensity levels with different parameter sets:
+  ```bash
+  ./aurora_stress_test.sh --intensity <low|medium|high|custom>
+  ```
+  - **Low**: 5 threads, 5 tables, 100K rows, 60s duration
+  - **Medium**: 20 threads, 20 tables, 500K rows, 180s duration
+  - **High**: 50 threads, 50 tables, 1M rows, 300s duration
+
+- **Fine-grained Parameter Control**: Customize test parameters:
+  ```bash
+  ./aurora_stress_test.sh --threads 100 --tables 50 --table-size 1000000 --duration 300
+  ```
+
+- **Table Consistency Check**: Automatically adjusts if requested tables don't exist
 
 ## Makefile Commands
 
