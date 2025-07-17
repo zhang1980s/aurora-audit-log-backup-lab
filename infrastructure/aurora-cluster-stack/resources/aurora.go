@@ -4,7 +4,6 @@ import (
 	"github.com/pulumi/pulumi-aws/sdk/v6/go/aws/ec2"
 	"github.com/pulumi/pulumi-aws/sdk/v6/go/aws/iam"
 	"github.com/pulumi/pulumi-aws/sdk/v6/go/aws/rds"
-	"github.com/pulumi/pulumi-aws/sdk/v6/go/aws/s3"
 	"github.com/pulumi/pulumi-aws/sdk/v6/go/aws/ssm"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 
@@ -16,7 +15,6 @@ import (
 type AuroraResources struct {
 	AuroraSecurityGroup *ec2.SecurityGroup
 	AuroraRole          *iam.Role
-	AuditLogBucket      *s3.Bucket
 	AuroraCluster       *rds.Cluster
 	AuroraPrimary       *rds.ClusterInstance
 	AuroraReplica       *rds.ClusterInstance
@@ -48,59 +46,7 @@ func CreateAuroraResources(ctx *pulumi.Context, cfg *config.Config, networkStack
 		return nil, err
 	}
 
-	// Create S3 bucket for audit logs
-	auditLogBucket, err := s3.NewBucket(ctx, "audit-logs-bucket", &s3.BucketArgs{
-		Acl: pulumi.String("private"),
-		Tags: CreateResourceTags(ctx, cfg.Tags, "aurora-audit-logs"),
-		// Configure server-side encryption
-		ServerSideEncryptionConfiguration: &s3.BucketServerSideEncryptionConfigurationArgs{
-			Rule: &s3.BucketServerSideEncryptionConfigurationRuleArgs{
-				ApplyServerSideEncryptionByDefault: &s3.BucketServerSideEncryptionConfigurationRuleApplyServerSideEncryptionByDefaultArgs{
-					SseAlgorithm: pulumi.String("AES256"),
-				},
-			},
-		},
-		// Configure lifecycle rules for log retention
-		LifecycleRules: s3.BucketLifecycleRuleArray{
-			&s3.BucketLifecycleRuleArgs{
-				Id:      pulumi.String("expire-old-logs"),
-				Enabled: pulumi.Bool(true),
-				Expiration: &s3.BucketLifecycleRuleExpirationArgs{
-					Days: pulumi.Int(90), // Keep logs for 90 days
-				},
-			},
-		},
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// Create bucket policy to allow access from Aurora via VPC Endpoint
-	_, err = s3.NewBucketPolicy(ctx, "audit-logs-bucket-policy", &s3.BucketPolicyArgs{
-		Bucket: auditLogBucket.ID(),
-		Policy: pulumi.All(auditLogBucket.Arn).ApplyT(func(args []interface{}) string {
-			bucketArn := args[0].(string)
-			return `{
-				"Version": "2012-10-17",
-				"Statement": [
-					{
-						"Effect": "Allow",
-						"Principal": {
-							"Service": "rds.amazonaws.com"
-						},
-						"Action": [
-							"s3:PutObject",
-							"s3:GetObject"
-						],
-						"Resource": "` + bucketArn + `/*"
-					}
-				]
-			}`
-		}).(pulumi.StringOutput),
-	})
-	if err != nil {
-		return nil, err
-	}
+	// Aurora security group has been created
 
 	// Create Aurora role
 	auroraRole, err := iam.NewRole(ctx, "aurora-role", &iam.RoleArgs{
@@ -121,42 +67,7 @@ func CreateAuroraResources(ctx *pulumi.Context, cfg *config.Config, networkStack
 		return nil, err
 	}
 
-	// Create policy for S3 access
-	s3AccessPolicy, err := iam.NewPolicy(ctx, "s3-access-policy", &iam.PolicyArgs{
-		Description: pulumi.String("Policy for S3 access to audit logs"),
-		Policy: pulumi.All(auditLogBucket.Arn).ApplyT(func(args []interface{}) string {
-			bucketArn := args[0].(string)
-			return `{
-				"Version": "2012-10-17",
-				"Statement": [
-					{
-						"Action": [
-							"s3:GetObject",
-							"s3:PutObject",
-							"s3:ListBucket"
-						],
-						"Effect": "Allow",
-						"Resource": [
-							"` + bucketArn + `",
-							"` + bucketArn + `/*"
-						]
-					}
-				]
-			}`
-		}).(pulumi.StringOutput),
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// Attach S3 access policy to Aurora role
-	_, err = iam.NewRolePolicyAttachment(ctx, "aurora-s3-access-policy", &iam.RolePolicyAttachmentArgs{
-		Role:      auroraRole.Name,
-		PolicyArn: s3AccessPolicy.Arn,
-	})
-	if err != nil {
-		return nil, err
-	}
+	// Aurora role has been created
 
 	// Create subnet group for Aurora cluster
 	subnetGroup, err := rds.NewSubnetGroup(ctx, "aurora-subnet-group", &rds.SubnetGroupArgs{
@@ -254,21 +165,11 @@ func CreateAuroraResources(ctx *pulumi.Context, cfg *config.Config, networkStack
 		return nil, err
 	}
 
-	// Store S3 bucket name in SSM Parameter Store
-	_, err = ssm.NewParameter(ctx, "s3-bucket-param", &ssm.ParameterArgs{
-		Name:  pulumi.String("/aurora-audit-log-lab/s3-bucket-name"),
-		Type:  pulumi.String("String"),
-		Value: auditLogBucket.ID(),
-		Tags:  CreateResourceTags(ctx, cfg.Tags, "s3-bucket-name"),
-	})
-	if err != nil {
-		return nil, err
-	}
+	// Aurora endpoint parameter has been created
 
 	return &AuroraResources{
 		AuroraSecurityGroup: auroraSecurityGroup,
 		AuroraRole:          auroraRole,
-		AuditLogBucket:      auditLogBucket,
 		AuroraCluster:       cluster,
 		AuroraPrimary:       primary,
 		AuroraReplica:       replica,
