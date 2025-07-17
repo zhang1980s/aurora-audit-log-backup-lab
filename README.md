@@ -164,19 +164,19 @@ After deployment, you can connect to the EC2 instance and run the provided test 
    ./aurora_stress_test.sh --help
    
    # Setup the database with 50 tables of 1 million rows each
-   ./aurora_stress_test.sh --mode setup --tables 50 --table-size 1000000
+   ./aurora_stress_test.sh --mode setup --writer-endpoint aurora-cluster.example.com --tables 50 --table-size 1000000
    
    # Run high-intensity tests on the writer node only (audit logs will only appear on writer)
-   ./aurora_stress_test.sh --mode run --target-instance writer --intensity high
+   ./aurora_stress_test.sh --mode run --target-instance writer --intensity high --writer-endpoint aurora-cluster.example.com
    
    # Run read-only tests on the reader node (audit logs will only appear on reader)
-   ./aurora_stress_test.sh --mode run --target-instance reader --workload-type oltp_read_only
+   ./aurora_stress_test.sh --mode run --target-instance reader --workload-type oltp_read_only --writer-endpoint aurora-cluster.example.com --reader-endpoint aurora-cluster-ro.example.com
    
    # Run custom intensity tests on both nodes (audit logs will appear on both instances)
-   ./aurora_stress_test.sh --mode run --intensity custom --threads 100 --duration 600
+   ./aurora_stress_test.sh --mode run --target-instance both --intensity custom --threads 100 --duration 600 --writer-endpoint aurora-cluster.example.com --reader-endpoint aurora-cluster-ro.example.com
    
    # Clean up all resources
-   ./aurora_stress_test.sh --mode cleanup
+   ./aurora_stress_test.sh --mode cleanup --writer-endpoint aurora-cluster.example.com
    ```
 
 4. Calculate log sizes for one or multiple DB instances using the Go application:
@@ -362,12 +362,12 @@ The project now includes an enhanced unified stress testing script (`aurora_stre
 
 - **Unified Workflow**: Single script with different execution modes:
   ```bash
-  ./aurora_stress_test.sh --mode <setup|run|cleanup|all>
+  ./aurora_stress_test.sh --mode <setup|run|cleanup|all> --writer-endpoint <writer-endpoint> [--reader-endpoint <reader-endpoint>]
   ```
 
 - **Instance Targeting**: Direct stress tests to specific Aurora instances and control audit logging:
   ```bash
-  ./aurora_stress_test.sh --target-instance <writer|reader|both>
+  ./aurora_stress_test.sh --target-instance <writer|reader|both> --writer-endpoint <writer-endpoint> --reader-endpoint <reader-endpoint>
   ```
   - When targeting a specific instance (writer or reader), audit logs will only be generated on that instance
   - When targeting both instances, audit logs will be generated on both instances
@@ -375,23 +375,100 @@ The project now includes an enhanced unified stress testing script (`aurora_stre
 
 - **Workload Type Selection**: Run specific types of tests:
   ```bash
-  ./aurora_stress_test.sh --workload-type oltp_read_only,oltp_read_write
+  ./aurora_stress_test.sh --workload-type oltp_read_only,oltp_read_write --writer-endpoint <writer-endpoint>
   ```
 
 - **Workload Intensity Control**: Predefined intensity levels with different parameter sets:
   ```bash
-  ./aurora_stress_test.sh --intensity <low|medium|high|custom>
+  ./aurora_stress_test.sh --intensity <low|medium|high|custom> --writer-endpoint <writer-endpoint>
   ```
   - **Low**: 5 threads, 5 tables, 100K rows, 60s duration
   - **Medium**: 20 threads, 20 tables, 500K rows, 180s duration
-  - **High**: 50 threads, 50 tables, 1M rows, 300s duration
+  - **High**: 25 threads, 25 tables, 1M rows, 300s duration
 
 - **Fine-grained Parameter Control**: Customize test parameters:
   ```bash
-  ./aurora_stress_test.sh --threads 100 --tables 50 --table-size 1000000 --duration 300
+  ./aurora_stress_test.sh --threads 100 --tables 50 --table-size 1000000 --duration 300 --writer-endpoint <writer-endpoint>
   ```
 
 - **Table Consistency Check**: Automatically adjusts if requested tables don't exist
+
+### Testing High Intensity on Both Reader and Writer Instances
+
+To run high-intensity tests on both reader and writer instances of your Aurora cluster, follow these steps:
+
+#### Step 1: Setup the Environment
+
+First, set up the test environment by creating the necessary database and tables:
+
+```bash
+./aurora_stress_test.sh \
+  --mode setup \
+  --writer-endpoint your-aurora-cluster-endpoint.region.rds.amazonaws.com \
+  --tables 50 \
+  --table-size 1000000
+```
+
+This will:
+- Connect to your Aurora writer instance
+- Create a test database named `sysbench_test`
+- Create a test user `sysbench` with password `sysbench123`
+- Create 50 tables with 1 million rows each
+
+#### Step 2: Run High-Intensity Tests on Both Instances
+
+After the setup is complete, run the high-intensity test on both reader and writer instances:
+
+```bash
+./aurora_stress_test.sh \
+  --mode run \
+  --target-instance both \
+  --intensity high \
+  --workload-type oltp_read_write \
+  --writer-endpoint your-aurora-cluster-endpoint.region.rds.amazonaws.com \
+  --reader-endpoint your-aurora-cluster-ro-endpoint.region.rds.amazonaws.com
+```
+
+This will:
+- Run a high-intensity test (50 threads, 50 tables, 1M rows per table, 300 seconds duration)
+- Execute the test on both writer and reader instances
+- Use the `oltp_read_write` workload type (mixed read/write operations)
+
+For read-only tests on the reader instance, you can use:
+
+```bash
+./aurora_stress_test.sh \
+  --mode run \
+  --target-instance reader \
+  --intensity high \
+  --workload-type oltp_read_only \
+  --writer-endpoint your-aurora-cluster-endpoint.region.rds.amazonaws.com \
+  --reader-endpoint your-aurora-cluster-ro-endpoint.region.rds.amazonaws.com
+```
+
+#### Step 3: Clean Up After Testing
+
+When you're done testing, clean up the test database and user:
+
+```bash
+./aurora_stress_test.sh \
+  --mode cleanup \
+  --writer-endpoint your-aurora-cluster-endpoint.region.rds.amazonaws.com
+```
+
+#### All-in-One Command
+
+If you want to perform all steps (setup, run, cleanup) in a single command:
+
+```bash
+./aurora_stress_test.sh \
+  --mode all \
+  --target-instance both \
+  --intensity high \
+  --workload-type oltp_read_write \
+  --writer-endpoint your-aurora-cluster-endpoint.region.rds.amazonaws.com \
+  --reader-endpoint your-aurora-cluster-ro-endpoint.region.rds.amazonaws.com
+```
 
 ## Makefile Commands
 

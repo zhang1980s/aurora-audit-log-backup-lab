@@ -1,0 +1,7 @@
+config:
+  aws:region: ap-southeast-1
+  environment: dev
+  project: aurora-audit-log-backup-lab
+  owner: zzhe
+  ec2-stress-client:keyPairName: "keypair-sandbox0-sin-mymac.pem"
+  ec2-stress-client:instanceType: "m8g.large"

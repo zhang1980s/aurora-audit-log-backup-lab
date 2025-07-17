@@ -1,0 +1,3 @@
+name: ec2-stress-client
+runtime: go
+description: EC2 Stress Client for Aurora Audit Log Backup Lab

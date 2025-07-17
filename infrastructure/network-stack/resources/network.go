@@ -1,11 +1,13 @@
-package main
+package resources
 
 import (
 	"fmt"
 
 	"github.com/pulumi/pulumi-aws/sdk/v6/go/aws/ec2"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
-	"github.com/pulumi/pulumi/sdk/v3/go/pulumi/config"
+
+	"aurora-network-stack/config"
+	"aurora-network-stack/utils"
 )
 
 // NetworkResources holds all the networking resources
@@ -23,23 +25,14 @@ type NetworkResources struct {
 	PrivateRouteTable   *ec2.RouteTable
 }
 
-// createNetworkResources creates all VPC and networking components
-func createNetworkResources(ctx *pulumi.Context) (*NetworkResources, error) {
-	// Get configuration values
-	awsCfg := config.New(ctx, "aws")
-	region := awsCfg.Require("region")
-
-	projectCfg := config.New(ctx, "aurora-audit-log-backup-lab")
-	az1 := projectCfg.Require("availabilityZone1")
-	az2 := projectCfg.Require("availabilityZone2")
+// CreateNetworkResources creates all VPC and networking components
+func CreateNetworkResources(ctx *pulumi.Context, cfg *config.Config) (*NetworkResources, error) {
 	// Create VPC
 	vpc, err := ec2.NewVpc(ctx, "aurora-vpc", &ec2.VpcArgs{
 		CidrBlock:          pulumi.String("10.0.0.0/16"),
 		EnableDnsSupport:   pulumi.Bool(true),
 		EnableDnsHostnames: pulumi.Bool(true),
-		Tags: pulumi.StringMap{
-			"Name": pulumi.String("aurora-vpc"),
-		},
+		Tags:               CreateResourceTags(ctx, cfg.Tags, "aurora-vpc"),
 	})
 	if err != nil {
 		return nil, err
@@ -49,10 +42,8 @@ func createNetworkResources(ctx *pulumi.Context) (*NetworkResources, error) {
 	publicSubnet, err := ec2.NewSubnet(ctx, "public-subnet", &ec2.SubnetArgs{
 		VpcId:            vpc.ID(),
 		CidrBlock:        pulumi.String("10.0.0.0/24"),
-		AvailabilityZone: pulumi.String(az1),
-		Tags: pulumi.StringMap{
-			"Name": pulumi.String("aurora-public-subnet"),
-		},
+		AvailabilityZone: pulumi.String(cfg.Network.AvailabilityZone1),
+		Tags:             CreateResourceTags(ctx, cfg.Tags, "aurora-public-subnet"),
 	})
 	if err != nil {
 		return nil, err
@@ -62,10 +53,8 @@ func createNetworkResources(ctx *pulumi.Context) (*NetworkResources, error) {
 	privateSubnet1, err := ec2.NewSubnet(ctx, "private-subnet-1", &ec2.SubnetArgs{
 		VpcId:            vpc.ID(),
 		CidrBlock:        pulumi.String("10.0.1.0/24"),
-		AvailabilityZone: pulumi.String(az1), // Same AZ as public subnet
-		Tags: pulumi.StringMap{
-			"Name": pulumi.String("aurora-private-subnet-1"),
-		},
+		AvailabilityZone: pulumi.String(cfg.Network.AvailabilityZone1), // Same AZ as public subnet
+		Tags:             CreateResourceTags(ctx, cfg.Tags, "aurora-private-subnet-1"),
 	})
 	if err != nil {
 		return nil, err
@@ -75,10 +64,8 @@ func createNetworkResources(ctx *pulumi.Context) (*NetworkResources, error) {
 	privateSubnet2, err := ec2.NewSubnet(ctx, "private-subnet-2", &ec2.SubnetArgs{
 		VpcId:            vpc.ID(),
 		CidrBlock:        pulumi.String("10.0.2.0/24"),
-		AvailabilityZone: pulumi.String(az2), // Different AZ
-		Tags: pulumi.StringMap{
-			"Name": pulumi.String("aurora-private-subnet-2"),
-		},
+		AvailabilityZone: pulumi.String(cfg.Network.AvailabilityZone2), // Different AZ
+		Tags:             CreateResourceTags(ctx, cfg.Tags, "aurora-private-subnet-2"),
 	})
 	if err != nil {
 		return nil, err
@@ -87,9 +74,7 @@ func createNetworkResources(ctx *pulumi.Context) (*NetworkResources, error) {
 	// Create Internet Gateway
 	igw, err := ec2.NewInternetGateway(ctx, "aurora-igw", &ec2.InternetGatewayArgs{
 		VpcId: vpc.ID(),
-		Tags: pulumi.StringMap{
-			"Name": pulumi.String("aurora-igw"),
-		},
+		Tags:  CreateResourceTags(ctx, cfg.Tags, "aurora-igw"),
 	})
 	if err != nil {
 		return nil, err
@@ -98,12 +83,10 @@ func createNetworkResources(ctx *pulumi.Context) (*NetworkResources, error) {
 	// Create S3 VPC Endpoint for private subnets only
 	s3VpcEndpoint, err := ec2.NewVpcEndpoint(ctx, "s3-vpc-endpoint", &ec2.VpcEndpointArgs{
 		VpcId:           vpc.ID(),
-		ServiceName:     pulumi.String(fmt.Sprintf("com.amazonaws.%s.s3", region)),
+		ServiceName:     pulumi.String(fmt.Sprintf("com.amazonaws.%s.s3", cfg.Region)),
 		VpcEndpointType: pulumi.String("Gateway"),
 		RouteTableIds:   pulumi.StringArray{}, // We'll associate it with private route table later
-		Tags: pulumi.StringMap{
-			"Name": pulumi.String("aurora-s3-vpc-endpoint"),
-		},
+		Tags:            CreateResourceTags(ctx, cfg.Tags, "aurora-s3-vpc-endpoint"),
 	})
 	if err != nil {
 		return nil, err
@@ -112,12 +95,10 @@ func createNetworkResources(ctx *pulumi.Context) (*NetworkResources, error) {
 	// Create DynamoDB VPC Endpoint for private subnets
 	dynamoDBVpcEndpoint, err := ec2.NewVpcEndpoint(ctx, "dynamodb-vpc-endpoint", &ec2.VpcEndpointArgs{
 		VpcId:           vpc.ID(),
-		ServiceName:     pulumi.String(fmt.Sprintf("com.amazonaws.%s.dynamodb", region)),
+		ServiceName:     pulumi.String(fmt.Sprintf("com.amazonaws.%s.dynamodb", cfg.Region)),
 		VpcEndpointType: pulumi.String("Gateway"),
 		RouteTableIds:   pulumi.StringArray{}, // We'll associate it with private route table later
-		Tags: pulumi.StringMap{
-			"Name": pulumi.String("aurora-dynamodb-vpc-endpoint"),
-		},
+		Tags:            CreateResourceTags(ctx, cfg.Tags, "aurora-dynamodb-vpc-endpoint"),
 	})
 	if err != nil {
 		return nil, err
@@ -136,9 +117,7 @@ func createNetworkResources(ctx *pulumi.Context) (*NetworkResources, error) {
 				Description: pulumi.String("Allow HTTPS from VPC"),
 			},
 		},
-		Tags: pulumi.StringMap{
-			"Name": pulumi.String("vpc-endpoint-sg"),
-		},
+		Tags: CreateResourceTags(ctx, cfg.Tags, "vpc-endpoint-sg"),
 	})
 	if err != nil {
 		return nil, err
@@ -147,14 +126,12 @@ func createNetworkResources(ctx *pulumi.Context) (*NetworkResources, error) {
 	// Create RDS API VPC Endpoint
 	rdsVpcEndpoint, err := ec2.NewVpcEndpoint(ctx, "rds-vpc-endpoint", &ec2.VpcEndpointArgs{
 		VpcId:             vpc.ID(),
-		ServiceName:       pulumi.String(fmt.Sprintf("com.amazonaws.%s.rds", region)),
+		ServiceName:       pulumi.String(fmt.Sprintf("com.amazonaws.%s.rds", cfg.Region)),
 		VpcEndpointType:   pulumi.String("Interface"),
 		SubnetIds:         pulumi.StringArray{privateSubnet1.ID(), privateSubnet2.ID()},
 		SecurityGroupIds:  pulumi.StringArray{vpcEndpointSG.ID()},
 		PrivateDnsEnabled: pulumi.Bool(true),
-		Tags: pulumi.StringMap{
-			"Name": pulumi.String("aurora-rds-vpc-endpoint"),
-		},
+		Tags:              CreateResourceTags(ctx, cfg.Tags, "aurora-rds-vpc-endpoint"),
 	})
 	if err != nil {
 		return nil, err
@@ -163,14 +140,12 @@ func createNetworkResources(ctx *pulumi.Context) (*NetworkResources, error) {
 	// Create SQS VPC Endpoint
 	sqsVpcEndpoint, err := ec2.NewVpcEndpoint(ctx, "sqs-vpc-endpoint", &ec2.VpcEndpointArgs{
 		VpcId:             vpc.ID(),
-		ServiceName:       pulumi.String(fmt.Sprintf("com.amazonaws.%s.sqs", region)),
+		ServiceName:       pulumi.String(fmt.Sprintf("com.amazonaws.%s.sqs", cfg.Region)),
 		VpcEndpointType:   pulumi.String("Interface"),
 		SubnetIds:         pulumi.StringArray{privateSubnet1.ID(), privateSubnet2.ID()},
 		SecurityGroupIds:  pulumi.StringArray{vpcEndpointSG.ID()},
 		PrivateDnsEnabled: pulumi.Bool(true),
-		Tags: pulumi.StringMap{
-			"Name": pulumi.String("aurora-sqs-vpc-endpoint"),
-		},
+		Tags:              CreateResourceTags(ctx, cfg.Tags, "aurora-sqs-vpc-endpoint"),
 	})
 	if err != nil {
 		return nil, err
@@ -185,9 +160,7 @@ func createNetworkResources(ctx *pulumi.Context) (*NetworkResources, error) {
 				GatewayId: igw.ID(),
 			},
 		},
-		Tags: pulumi.StringMap{
-			"Name": pulumi.String("aurora-public-rt"),
-		},
+		Tags: CreateResourceTags(ctx, cfg.Tags, "aurora-public-rt"),
 	})
 	if err != nil {
 		return nil, err
@@ -196,9 +169,7 @@ func createNetworkResources(ctx *pulumi.Context) (*NetworkResources, error) {
 	// Create private route table (without NAT Gateway route)
 	privateRouteTable, err := ec2.NewRouteTable(ctx, "private-rt", &ec2.RouteTableArgs{
 		VpcId: vpc.ID(),
-		Tags: pulumi.StringMap{
-			"Name": pulumi.String("aurora-private-rt"),
-		},
+		Tags:  CreateResourceTags(ctx, cfg.Tags, "aurora-private-rt"),
 	})
 	if err != nil {
 		return nil, err
@@ -231,9 +202,19 @@ func createNetworkResources(ctx *pulumi.Context) (*NetworkResources, error) {
 		return nil, err
 	}
 
-	// Associate S3 VPC Endpoint with private route table only
+	// Associate S3 VPC Endpoint with private route table
 	_, err = ec2.NewVpcEndpointRouteTableAssociation(ctx, "s3-endpoint-private-rt", &ec2.VpcEndpointRouteTableAssociationArgs{
 		RouteTableId:  privateRouteTable.ID(),
+		VpcEndpointId: s3VpcEndpoint.ID(),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Associate S3 VPC Endpoint with public route table as well
+	// This allows EC2 instances in the public subnet to access S3 via the VPC endpoint
+	_, err = ec2.NewVpcEndpointRouteTableAssociation(ctx, "s3-endpoint-public-rt", &ec2.VpcEndpointRouteTableAssociationArgs{
+		RouteTableId:  publicRouteTable.ID(),
 		VpcEndpointId: s3VpcEndpoint.ID(),
 	})
 	if err != nil {
@@ -262,4 +243,21 @@ func createNetworkResources(ctx *pulumi.Context) (*NetworkResources, error) {
 		PublicRouteTable:    publicRouteTable,
 		PrivateRouteTable:   privateRouteTable,
 	}, nil
+}
+
+// CreateResourceTags creates a pulumi.StringMap from the tags configuration
+func CreateResourceTags(ctx *pulumi.Context, cfg utils.TagsConfig, resourceName string) pulumi.StringMap {
+	tags := pulumi.StringMap{
+		"Name":        pulumi.String(resourceName),
+		"Environment": pulumi.String(cfg.Environment),
+		"Project":     pulumi.String(cfg.Project),
+		"Owner":       pulumi.String(cfg.Owner),
+	}
+
+	// Add custom tags
+	for k, v := range cfg.CustomTags {
+		tags[k] = pulumi.String(v)
+	}
+
+	return tags
 }

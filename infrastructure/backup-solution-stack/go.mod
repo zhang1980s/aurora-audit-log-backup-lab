@@ -1,4 +1,4 @@
-module aurora-audit-log-backup-lab
+module backup-solution-stack
 
 go 1.24.4
 

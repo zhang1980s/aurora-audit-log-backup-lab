@@ -1,0 +1,20 @@
+config:
+  aws:region: us-east-1
+  environment: prod
+  project: aurora-audit-log-backup
+  owner: cloud-engineering-team
+  backup-solution:dbScannerMemory: "1024"
+  backup-solution:dbScannerTimeout: "120"
+  backup-solution:logDetectorMemory: "2048"
+  backup-solution:logDetectorTimeout: "600"
+  backup-solution:logDownloaderMemory: "2048"
+  backup-solution:logDownloaderTimeout: "600"
+  backup-solution:sqsVisibilityTimeout: "600"
+  backup-solution:lambdaBatchSize: "20"
+  backup-solution:eventBridgeSchedule: "rate(5 minutes)"
+  backup-solution:s3LogPrefix: "aurora-logs"
+  backup-solution:publishLambdaVersions: "true"
+  backup-solution:backupLogTypes: "audit,error,instance"
+  backup-solution:dbScannerImageVersion: "v1.0.0"
+  backup-solution:logDetectorImageVersion: "v1.0.0"
+  backup-solution:logDownloaderImageVersion: "v1.0.0"

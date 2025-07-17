@@ -1,0 +1,3 @@
+name: aurora-network
+runtime: go
+description: Network infrastructure for Aurora Audit Log Backup Lab

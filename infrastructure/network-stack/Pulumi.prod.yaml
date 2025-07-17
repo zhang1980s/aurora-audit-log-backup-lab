@@ -1,0 +1,7 @@
+config:
+  aws:region: us-east-1
+  environment: prod
+  project: aurora-audit-log-backup
+  owner: cloud-engineering-team
+  aurora-network:availabilityZone1: us-east-1a
+  aurora-network:availabilityZone2: us-east-1b

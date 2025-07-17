@@ -1,0 +1,7 @@
+config:
+  aws:region: ap-southeast-1
+  environment: dev
+  project: aurora-audit-log-backup-lab
+  owner: zzhe
+  aurora-network:availabilityZone1: ap-southeast-1a
+  aurora-network:availabilityZone2: ap-southeast-1b

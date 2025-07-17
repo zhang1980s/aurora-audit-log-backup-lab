@@ -5,8 +5,8 @@ config:
   
   # Mandatory tags
   environment: "dev"
-  project: "aurora-audit-log-backup"
-  owner: "cloud-engineering-team"
+  project: "aurora-audit-log-backup-lab"
+  owner: "zzhe"
   
   # ECR configuration
   scanOnPush: "true"

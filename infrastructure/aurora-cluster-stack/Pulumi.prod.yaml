@@ -1,0 +1,6 @@
+config:
+  aws:region: us-east-1
+  environment: prod
+  project: aurora-audit-log-backup
+  owner: cloud-engineering-team
+  aurora-cluster:instanceType: db.r5.large

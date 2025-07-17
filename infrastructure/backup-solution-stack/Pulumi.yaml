@@ -1,0 +1,3 @@
+name: backup-solution
+runtime: go
+description: Backup Solution for Aurora Audit Log Backup Lab

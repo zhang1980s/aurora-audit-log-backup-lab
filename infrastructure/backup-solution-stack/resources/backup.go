@@ -1,8 +1,6 @@
-package main
+package resources
 
 import (
-	"strconv"
-
 	"github.com/pulumi/pulumi-aws/sdk/v6/go/aws/cloudwatch"
 	"github.com/pulumi/pulumi-aws/sdk/v6/go/aws/dynamodb"
 	"github.com/pulumi/pulumi-aws/sdk/v6/go/aws/ec2"
@@ -11,11 +9,13 @@ import (
 	"github.com/pulumi/pulumi-aws/sdk/v6/go/aws/s3"
 	"github.com/pulumi/pulumi-aws/sdk/v6/go/aws/sqs"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
-	"github.com/pulumi/pulumi/sdk/v3/go/pulumi/config"
+
+	"backup-solution-stack/config"
+	"backup-solution-stack/utils"
 )
 
-// LogBackupResources holds all the resources for the log backup solution
-type LogBackupResources struct {
+// BackupResources holds all the resources for the backup solution
+type BackupResources struct {
 	LogBucket                *s3.Bucket
 	DynamoDBTable            *dynamodb.Table
 	SQSQueue                 *sqs.Queue
@@ -29,69 +29,25 @@ type LogBackupResources struct {
 	EventBridgeRule          *cloudwatch.EventRule
 }
 
-// createLogBackupResources creates all the resources for the log backup solution
-func createLogBackupResources(ctx *pulumi.Context, networkResources *NetworkResources, ecrStack *pulumi.StackReference) (*LogBackupResources, error) {
-	// Get configuration values
-	projectCfg := config.New(ctx, "aurora-audit-log-backup-lab")
-
-	// Lambda memory and timeout settings
-	dbScannerMemory, err := strconv.Atoi(projectCfg.Require("dbScannerMemory"))
-	if err != nil {
-		return nil, err
-	}
-	dbScannerTimeout, err := strconv.Atoi(projectCfg.Require("dbScannerTimeout"))
-	if err != nil {
-		return nil, err
-	}
-
-	logDetectorMemory, err := strconv.Atoi(projectCfg.Require("logDetectorMemory"))
-	if err != nil {
-		return nil, err
-	}
-	logDetectorTimeout, err := strconv.Atoi(projectCfg.Require("logDetectorTimeout"))
-	if err != nil {
-		return nil, err
-	}
-
-	logDownloaderMemory, err := strconv.Atoi(projectCfg.Require("logDownloaderMemory"))
-	if err != nil {
-		return nil, err
-	}
-	logDownloaderTimeout, err := strconv.Atoi(projectCfg.Require("logDownloaderTimeout"))
-	if err != nil {
-		return nil, err
-	}
-
-	// Other settings
-	eventBridgeSchedule := projectCfg.Require("eventBridgeSchedule")
-	s3LogPrefix := projectCfg.Require("s3LogPrefix")
-
-	lambdaBatchSize, err := strconv.Atoi(projectCfg.Require("lambdaBatchSize"))
-	if err != nil {
-		return nil, err
-	}
-
-	// Get image versions from config
-	dbScannerImageVersion := projectCfg.Get("dbScannerImageVersion")
-	if dbScannerImageVersion == "" {
-		dbScannerImageVersion = "latest" // Fallback to latest if not specified
-	}
-
-	logDetectorImageVersion := projectCfg.Get("logDetectorImageVersion")
-	if logDetectorImageVersion == "" {
-		logDetectorImageVersion = "latest"
-	}
-
-	logDownloaderImageVersion := projectCfg.Get("logDownloaderImageVersion")
-	if logDownloaderImageVersion == "" {
-		logDownloaderImageVersion = "latest"
-	}
-
-	// Check if we should publish Lambda versions
-	publishVersions := false
-	if publishVersionsStr := projectCfg.Get("publishLambdaVersions"); publishVersionsStr == "true" {
-		publishVersions = true
-	}
+// CreateBackupResources creates all the resources for the backup solution
+func CreateBackupResources(ctx *pulumi.Context, cfg *config.Config, networkStack *pulumi.StackReference, ecrStack *pulumi.StackReference) (*BackupResources, error) {
+	// Get network resources from network stack
+	vpcIdOutput := networkStack.GetOutput(pulumi.String("vpcId"))
+	privateSubnet1IdOutput := networkStack.GetOutput(pulumi.String("privateSubnet1Id"))
+	privateSubnet2IdOutput := networkStack.GetOutput(pulumi.String("privateSubnet2Id"))
+	
+	// Convert AnyOutput to StringOutput for use in resource arguments
+	vpcId := vpcIdOutput.ApplyT(func(v interface{}) string {
+		return v.(string)
+	}).(pulumi.StringOutput)
+	
+	privateSubnet1Id := privateSubnet1IdOutput.ApplyT(func(v interface{}) string {
+		return v.(string)
+	}).(pulumi.StringOutput)
+	
+	privateSubnet2Id := privateSubnet2IdOutput.ApplyT(func(v interface{}) string {
+		return v.(string)
+	}).(pulumi.StringOutput)
 
 	// Get ECR repository URLs from ECR stack
 	dbScannerRepoUrl := ecrStack.GetOutput(pulumi.String("dbScannerRepositoryUrl"))
@@ -100,10 +56,8 @@ func createLogBackupResources(ctx *pulumi.Context, networkResources *NetworkReso
 
 	// Create S3 bucket for log backups
 	logBucket, err := s3.NewBucket(ctx, "aurora-log-backup-bucket", &s3.BucketArgs{
-		Acl: pulumi.String("private"),
-		Tags: pulumi.StringMap{
-			"Name": pulumi.String("aurora-log-backup"),
-		},
+		Acl:  pulumi.String("private"),
+		Tags: CreateResourceTags(ctx, cfg.Tags, "aurora-log-backup"),
 		// Configure server-side encryption
 		ServerSideEncryptionConfiguration: &s3.BucketServerSideEncryptionConfigurationArgs{
 			Rule: &s3.BucketServerSideEncryptionConfigurationRuleArgs{
@@ -144,9 +98,7 @@ func createLogBackupResources(ctx *pulumi.Context, networkResources *NetworkReso
 		BillingMode:    pulumi.String("PAY_PER_REQUEST"),
 		StreamEnabled:  pulumi.Bool(true),
 		StreamViewType: pulumi.String("NEW_AND_OLD_IMAGES"),
-		Tags: pulumi.StringMap{
-			"Name": pulumi.String("aurora-log-files"),
-		},
+		Tags:           CreateResourceTags(ctx, cfg.Tags, "aurora-log-files"),
 	})
 	if err != nil {
 		return nil, err
@@ -154,11 +106,9 @@ func createLogBackupResources(ctx *pulumi.Context, networkResources *NetworkReso
 
 	// Create SQS queue for DB instance IDs
 	queue, err := sqs.NewQueue(ctx, "aurora-db-instances", &sqs.QueueArgs{
-		VisibilityTimeoutSeconds: pulumi.Int(300),   // 5 minutes
+		VisibilityTimeoutSeconds: pulumi.Int(cfg.Lambda.SQSVisibilityTimeout),
 		MessageRetentionSeconds:  pulumi.Int(86400), // 24 hours
-		Tags: pulumi.StringMap{
-			"Name": pulumi.String("aurora-db-instances"),
-		},
+		Tags:                     CreateResourceTags(ctx, cfg.Tags, "aurora-db-instances"),
 	})
 	if err != nil {
 		return nil, err
@@ -177,9 +127,7 @@ func createLogBackupResources(ctx *pulumi.Context, networkResources *NetworkReso
 				"Sid": ""
 			}]
 		}`),
-		Tags: pulumi.StringMap{
-			"Name": pulumi.String("aurora-log-backup-lambda-role"),
-		},
+		Tags: CreateResourceTags(ctx, cfg.Tags, "aurora-log-backup-lambda-role"),
 	})
 	if err != nil {
 		return nil, err
@@ -205,7 +153,8 @@ func createLogBackupResources(ctx *pulumi.Context, networkResources *NetworkReso
 					"Action": [
 						"rds:DescribeDBInstances",
 						"rds:DescribeDBLogFiles",
-						"rds:DownloadDBLogFilePortion"
+						"rds:DownloadDBLogFilePortion",
+						"rds:DownloadCompleteDBLogFile"
 					],
 					"Resource": "*"
 				},
@@ -258,9 +207,21 @@ func createLogBackupResources(ctx *pulumi.Context, networkResources *NetworkReso
 						"ec2:DescribeVpcs"
 					],
 					"Resource": "*"
+				},
+				{
+					"Effect": "Allow",
+					"Action": [
+						"xray:PutTraceSegments",
+						"xray:PutTelemetryRecords",
+						"xray:GetSamplingRules",
+						"xray:GetSamplingTargets",
+						"xray:GetSamplingStatisticSummaries"
+					],
+					"Resource": "*"
 				}
 			]
 		}`),
+		Tags: CreateResourceTags(ctx, cfg.Tags, "aurora-log-backup-lambda-policy"),
 	})
 	if err != nil {
 		return nil, err
@@ -277,7 +238,7 @@ func createLogBackupResources(ctx *pulumi.Context, networkResources *NetworkReso
 
 	// Create security group for Lambda functions
 	lambdaSecurityGroup, err := ec2.NewSecurityGroup(ctx, "lambda-sg", &ec2.SecurityGroupArgs{
-		VpcId:       networkResources.Vpc.ID(),
+		VpcId:       vpcId,
 		Description: pulumi.String("Security group for Lambda functions"),
 		Egress: ec2.SecurityGroupEgressArray{
 			&ec2.SecurityGroupEgressArgs{
@@ -288,9 +249,7 @@ func createLogBackupResources(ctx *pulumi.Context, networkResources *NetworkReso
 				Description: pulumi.String("Allow all outbound traffic"),
 			},
 		},
-		Tags: pulumi.StringMap{
-			"Name": pulumi.String("lambda-sg"),
-		},
+		Tags: CreateResourceTags(ctx, cfg.Tags, "lambda-sg"),
 	})
 	if err != nil {
 		return nil, err
@@ -299,19 +258,19 @@ func createLogBackupResources(ctx *pulumi.Context, networkResources *NetworkReso
 	// Create DB Scanner Lambda function with container image
 	dbScannerLambda, err := lambda.NewFunction(ctx, "aurora-db-scanner", &lambda.FunctionArgs{
 		PackageType: pulumi.String("Image"),
-		ImageUri:    pulumi.Sprintf("%s:%s", dbScannerRepoUrl, dbScannerImageVersion),
+		ImageUri:    pulumi.Sprintf("%s:%s", dbScannerRepoUrl, cfg.Images.DBScannerVersion),
 		Role:        lambdaRole.Arn,
-		MemorySize:  pulumi.Int(dbScannerMemory),
-		Timeout:     pulumi.Int(dbScannerTimeout),
-		Publish:     pulumi.Bool(publishVersions),
-		Description: pulumi.Sprintf("Aurora DB Scanner Lambda - Version %s", dbScannerImageVersion),
+		MemorySize:  pulumi.Int(cfg.Lambda.DBScannerMemory),
+		Timeout:     pulumi.Int(cfg.Lambda.DBScannerTimeout),
+		Publish:     pulumi.Bool(cfg.Lambda.PublishVersions),
+		Description: pulumi.Sprintf("Aurora DB Scanner Lambda - Version %s", cfg.Images.DBScannerVersion),
 		Architectures: pulumi.StringArray{
 			pulumi.String("arm64"),
 		},
 		VpcConfig: &lambda.FunctionVpcConfigArgs{
 			SubnetIds: pulumi.StringArray{
-				networkResources.PrivateSubnet1.ID(),
-				networkResources.PrivateSubnet2.ID(),
+				privateSubnet1Id,
+				privateSubnet2Id,
 			},
 			SecurityGroupIds: pulumi.StringArray{
 				lambdaSecurityGroup.ID(),
@@ -320,11 +279,13 @@ func createLogBackupResources(ctx *pulumi.Context, networkResources *NetworkReso
 		Environment: &lambda.FunctionEnvironmentArgs{
 			Variables: pulumi.StringMap{
 				"SQS_QUEUE_URL": queue.Url,
+				"LOG_LEVEL":     pulumi.String("error"),
 			},
 		},
-		Tags: pulumi.StringMap{
-			"Name": pulumi.String("aurora-db-scanner"),
+		TracingConfig: &lambda.FunctionTracingConfigArgs{
+			Mode: pulumi.String("Active"),
 		},
+		Tags: CreateResourceTags(ctx, cfg.Tags, "aurora-db-scanner"),
 	})
 	if err != nil {
 		return nil, err
@@ -344,19 +305,19 @@ func createLogBackupResources(ctx *pulumi.Context, networkResources *NetworkReso
 	// Create Log Detector Lambda function with container image
 	logDetectorLambda, err := lambda.NewFunction(ctx, "aurora-log-detector", &lambda.FunctionArgs{
 		PackageType: pulumi.String("Image"),
-		ImageUri:    pulumi.Sprintf("%s:%s", logDetectorRepoUrl, logDetectorImageVersion),
+		ImageUri:    pulumi.Sprintf("%s:%s", logDetectorRepoUrl, cfg.Images.LogDetectorVersion),
 		Role:        lambdaRole.Arn,
-		MemorySize:  pulumi.Int(logDetectorMemory),
-		Timeout:     pulumi.Int(logDetectorTimeout),
-		Publish:     pulumi.Bool(publishVersions),
-		Description: pulumi.Sprintf("Aurora Log Detector Lambda - Version %s", logDetectorImageVersion),
+		MemorySize:  pulumi.Int(cfg.Lambda.LogDetectorMemory),
+		Timeout:     pulumi.Int(cfg.Lambda.LogDetectorTimeout),
+		Publish:     pulumi.Bool(cfg.Lambda.PublishVersions),
+		Description: pulumi.Sprintf("Aurora Log Detector Lambda - Version %s", cfg.Images.LogDetectorVersion),
 		Architectures: pulumi.StringArray{
 			pulumi.String("arm64"),
 		},
 		VpcConfig: &lambda.FunctionVpcConfigArgs{
 			SubnetIds: pulumi.StringArray{
-				networkResources.PrivateSubnet1.ID(),
-				networkResources.PrivateSubnet2.ID(),
+				privateSubnet1Id,
+				privateSubnet2Id,
 			},
 			SecurityGroupIds: pulumi.StringArray{
 				lambdaSecurityGroup.ID(),
@@ -365,11 +326,14 @@ func createLogBackupResources(ctx *pulumi.Context, networkResources *NetworkReso
 		Environment: &lambda.FunctionEnvironmentArgs{
 			Variables: pulumi.StringMap{
 				"DYNAMODB_TABLE_NAME": dynamoTable.Name,
+				"LOG_LEVEL":           pulumi.String("error"),
+				"BACKUP_LOGS":         pulumi.String(cfg.Lambda.BackupLogTypes),
 			},
 		},
-		Tags: pulumi.StringMap{
-			"Name": pulumi.String("aurora-log-detector"),
+		TracingConfig: &lambda.FunctionTracingConfigArgs{
+			Mode: pulumi.String("Active"),
 		},
+		Tags: CreateResourceTags(ctx, cfg.Tags, "aurora-log-detector"),
 	})
 	if err != nil {
 		return nil, err
@@ -389,19 +353,19 @@ func createLogBackupResources(ctx *pulumi.Context, networkResources *NetworkReso
 	// Create Log Downloader Lambda function with container image
 	logDownloaderLambda, err := lambda.NewFunction(ctx, "aurora-log-downloader", &lambda.FunctionArgs{
 		PackageType: pulumi.String("Image"),
-		ImageUri:    pulumi.Sprintf("%s:%s", logDownloaderRepoUrl, logDownloaderImageVersion),
+		ImageUri:    pulumi.Sprintf("%s:%s", logDownloaderRepoUrl, cfg.Images.LogDownloaderVersion),
 		Role:        lambdaRole.Arn,
-		MemorySize:  pulumi.Int(logDownloaderMemory),
-		Timeout:     pulumi.Int(logDownloaderTimeout),
-		Publish:     pulumi.Bool(publishVersions),
-		Description: pulumi.Sprintf("Aurora Log Downloader Lambda - Version %s", logDownloaderImageVersion),
+		MemorySize:  pulumi.Int(cfg.Lambda.LogDownloaderMemory),
+		Timeout:     pulumi.Int(cfg.Lambda.LogDownloaderTimeout),
+		Publish:     pulumi.Bool(cfg.Lambda.PublishVersions),
+		Description: pulumi.Sprintf("Aurora Log Downloader Lambda - Version %s", cfg.Images.LogDownloaderVersion),
 		Architectures: pulumi.StringArray{
 			pulumi.String("arm64"),
 		},
 		VpcConfig: &lambda.FunctionVpcConfigArgs{
 			SubnetIds: pulumi.StringArray{
-				networkResources.PrivateSubnet1.ID(),
-				networkResources.PrivateSubnet2.ID(),
+				privateSubnet1Id,
+				privateSubnet2Id,
 			},
 			SecurityGroupIds: pulumi.StringArray{
 				lambdaSecurityGroup.ID(),
@@ -411,12 +375,14 @@ func createLogBackupResources(ctx *pulumi.Context, networkResources *NetworkReso
 			Variables: pulumi.StringMap{
 				"DYNAMODB_TABLE_NAME": dynamoTable.Name,
 				"S3_BUCKET_NAME":      logBucket.ID(),
-				"S3_PREFIX":           pulumi.String(s3LogPrefix),
+				"S3_PREFIX":           pulumi.String(cfg.Lambda.S3LogPrefix),
+				"LOG_LEVEL":           pulumi.String("error"),
 			},
 		},
-		Tags: pulumi.StringMap{
-			"Name": pulumi.String("aurora-log-downloader"),
+		TracingConfig: &lambda.FunctionTracingConfigArgs{
+			Mode: pulumi.String("Active"),
 		},
+		Tags: CreateResourceTags(ctx, cfg.Tags, "aurora-log-downloader"),
 	})
 	if err != nil {
 		return nil, err
@@ -435,12 +401,10 @@ func createLogBackupResources(ctx *pulumi.Context, networkResources *NetworkReso
 
 	// Create EventBridge rule to trigger DB Scanner Lambda (initially disabled)
 	eventRule, err := cloudwatch.NewEventRule(ctx, "aurora-db-scanner-schedule", &cloudwatch.EventRuleArgs{
-		ScheduleExpression: pulumi.String(eventBridgeSchedule),
+		ScheduleExpression: pulumi.String(cfg.Lambda.EventBridgeSchedule),
 		Description:        pulumi.String("Trigger Aurora DB Scanner Lambda every 15 minutes"),
-		Tags: pulumi.StringMap{
-			"Name": pulumi.String("aurora-db-scanner-schedule"),
-		},
-		State: pulumi.String("DISABLED"), // Create the rule in disabled state
+		Tags:               CreateResourceTags(ctx, cfg.Tags, "aurora-db-scanner-schedule"),
+		State:              pulumi.String("DISABLED"), // Create the rule in disabled state
 	})
 	if err != nil {
 		return nil, err
@@ -471,7 +435,7 @@ func createLogBackupResources(ctx *pulumi.Context, networkResources *NetworkReso
 	_, err = lambda.NewEventSourceMapping(ctx, "aurora-log-detector-sqs-mapping", &lambda.EventSourceMappingArgs{
 		EventSourceArn: queue.Arn,
 		FunctionName:   logDetectorAlias.Arn, // Use alias ARN instead of function ARN
-		BatchSize:      pulumi.Int(lambdaBatchSize),
+		BatchSize:      pulumi.Int(cfg.Lambda.BatchSize),
 	}, pulumi.DependsOn([]pulumi.Resource{logDetectorAlias}))
 	if err != nil {
 		return nil, err
@@ -482,26 +446,13 @@ func createLogBackupResources(ctx *pulumi.Context, networkResources *NetworkReso
 		EventSourceArn:   dynamoTable.StreamArn,
 		FunctionName:     logDownloaderAlias.Arn, // Use alias ARN instead of function ARN
 		StartingPosition: pulumi.String("LATEST"),
-		BatchSize:        pulumi.Int(lambdaBatchSize),
+		BatchSize:        pulumi.Int(cfg.Lambda.BatchSize),
 	}, pulumi.DependsOn([]pulumi.Resource{logDownloaderAlias}))
 	if err != nil {
 		return nil, err
 	}
 
-	// Export resource ARNs and names
-	ctx.Export("logBucketName", logBucket.ID())
-	ctx.Export("dynamoTableName", dynamoTable.Name)
-	ctx.Export("sqsQueueUrl", queue.Url)
-	ctx.Export("dbScannerLambdaArn", dbScannerLambda.Arn)
-	ctx.Export("logDetectorLambdaArn", logDetectorLambda.Arn)
-	ctx.Export("logDownloaderLambdaArn", logDownloaderLambda.Arn)
-
-	// Export Lambda aliases
-	ctx.Export("dbScannerLambdaAliasArn", dbScannerAlias.Arn)
-	ctx.Export("logDetectorLambdaAliasArn", logDetectorAlias.Arn)
-	ctx.Export("logDownloaderLambdaAliasArn", logDownloaderAlias.Arn)
-
-	return &LogBackupResources{
+	return &BackupResources{
 		LogBucket:                logBucket,
 		DynamoDBTable:            dynamoTable,
 		SQSQueue:                 queue,
@@ -514,4 +465,21 @@ func createLogBackupResources(ctx *pulumi.Context, networkResources *NetworkReso
 		LogDownloaderLambdaAlias: logDownloaderAlias,
 		EventBridgeRule:          eventRule,
 	}, nil
+}
+
+// CreateResourceTags creates a pulumi.StringMap from the tags configuration
+func CreateResourceTags(ctx *pulumi.Context, cfg utils.TagsConfig, resourceName string) pulumi.StringMap {
+	tags := pulumi.StringMap{
+		"Name":        pulumi.String(resourceName),
+		"Environment": pulumi.String(cfg.Environment),
+		"Project":     pulumi.String(cfg.Project),
+		"Owner":       pulumi.String(cfg.Owner),
+	}
+
+	// Add custom tags
+	for k, v := range cfg.CustomTags {
+		tags[k] = pulumi.String(v)
+	}
+
+	return tags
 }
