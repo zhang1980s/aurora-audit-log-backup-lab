@@ -27,8 +27,14 @@ func main() {
 			return err
 		}
 
+		// Get backup solution stack reference
+		backupStack, err := pulumi.NewStackReference(ctx, "zhang1980s/backup-solution/dev", nil)
+		if err != nil {
+			return err
+		}
+
 		// Create EC2 resources
-		ec2Resources, err := resources.CreateEC2Resources(ctx, cfg, networkStack, auroraStack)
+		ec2Resources, err := resources.CreateEC2Resources(ctx, cfg, networkStack, auroraStack, backupStack)
 		if err != nil {
 			return err
 		}

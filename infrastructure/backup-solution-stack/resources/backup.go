@@ -648,6 +648,10 @@ func CreateBackupResources(ctx *pulumi.Context, cfg *config.Config, networkStack
 		return nil, err
 	}
 
+	// Export the S3 bucket name for use by other stacks
+	ctx.Export("logBucketName", logBucket.ID())
+	ctx.Export("logBucketArn", logBucket.Arn)
+
 	return &BackupResources{
 		LogBucket:                logBucket,
 		DynamoDBTable:            dynamoTable,
