@@ -1,6 +1,10 @@
 # Aurora Audit Log Backup Lab
 
-This project demonstrates an automated solution for backing up Aurora MySQL audit logs to S3 using serverless components.
+This project demonstrates an automated solution for backing up Aurora MySQL audit logs to S3 using serverless components. It's particularly suitable for scenarios requiring long-term storage of database audit logs to meet compliance requirements. If real-time log reading and analysis is needed, AWS's default CloudWatch log approach is recommended. However, if logs are primarily for archival purposes and rarely accessed, this solution can significantly reduce CloudWatch log injection and storage costs.
+
+## Documentation
+
+- [中文介绍文档](aurora-audit-log-backup-lab-introduction-zh.md) - Comprehensive introduction document in Chinese covering project overview, architecture, parameter descriptions, Pulumi installation guide, manual deployment instructions (including ECR repository creation, Docker image building, and VPC endpoint setup), testing procedures, and troubleshooting tips.
 
 ## Architecture
 
@@ -220,6 +224,217 @@ cd ../ecr-stack
 pulumi destroy
 ```
 
+## Manual Deployment Guide
+
+If you prefer to deploy the solution manually without using Pulumi, follow these steps:
+
+### Prerequisites
+
+1. AWS account with administrator privileges
+2. VPC and private subnets already created
+3. Aurora MySQL cluster already created
+
+### Step 1: Create ECR Repositories
+
+1. Log in to the AWS Console and navigate to the ECR service
+2. Click "Create repository"
+3. Select "Private" repository type
+4. Enter repository names (you need to create three repositories):
+   - `db-scanner`
+   - `log-detector`
+   - `log-downloader`
+5. In the "Tag immutability" section, select "Enable" to prevent overwriting image tags
+6. In the "Scan settings" section, select "Enable scanning" to automatically scan pushed images
+7. Click "Create repository"
+8. Repeat these steps for each repository
+
+### Step 2: Build and Push Docker Images
+
+1. Ensure Docker and AWS CLI are installed and AWS credentials are configured
+2. Get the ECR login command and execute it:
+
+```bash
+aws ecr get-login-password --region <your-region> | docker login --username AWS --password-stdin <your-account-id>.dkr.ecr.<your-region>.amazonaws.com
+```
+
+3. Review the Makefile in the project root directory to understand available build commands
+4. Build and push all Lambda images with version tags:
+
+```bash
+# Set environment variables
+export AWS_ACCOUNT_ID=<your-account-id>
+export AWS_REGION=<your-region>
+export VERSION=v1.0.0
+
+# Build and push all images
+make build-and-push-versioned
+```
+
+5. Alternatively, build and push each image separately:
+
+```bash
+# Build and push DB Scanner image
+make build-and-push-dbscanner VERSION=v1.0.0
+
+# Build and push Log Detector image
+make build-and-push-logdetector VERSION=v1.0.0
+
+# Build and push Log Downloader image
+make build-and-push-logdownloader VERSION=v1.0.0
+```
+
+6. Verify images were successfully pushed to ECR repositories:
+
+```bash
+aws ecr describe-images --repository-name db-scanner --region <your-region>
+aws ecr describe-images --repository-name log-detector --region <your-region>
+aws ecr describe-images --repository-name log-downloader --region <your-region>
+```
+
+### Step 3: Create VPC Endpoints
+
+#### S3 VPC Endpoint
+
+1. Log in to the AWS Console and navigate to the VPC service
+2. In the left navigation bar, click "Endpoints"
+3. Click "Create endpoint"
+4. In the "Service category" section, select "AWS services"
+5. In the search box, enter "s3", then select "com.amazonaws.<your-region>.s3" service
+6. Select your VPC
+7. In the "Configure route tables" section, select the route tables associated with your private subnets
+8. In the "Policy" section, select "Full access"
+9. Click "Create endpoint"
+
+#### DynamoDB VPC Endpoint
+
+1. Navigate to the VPC service's "Endpoints" section
+2. Click "Create endpoint"
+3. In the "Service category" section, select "AWS services"
+4. In the search box, enter "dynamodb", then select "com.amazonaws.<your-region>.dynamodb" service
+5. Select your VPC
+6. In the "Configure route tables" section, select the route tables associated with your private subnets
+7. In the "Policy" section, select "Full access"
+8. Click "Create endpoint"
+
+#### SQS VPC Endpoint
+
+1. Navigate to the VPC service's "Endpoints" section
+2. Click "Create endpoint"
+3. In the "Service category" section, select "AWS services"
+4. In the search box, enter "sqs", then select "com.amazonaws.<your-region>.sqs" service
+5. Select your VPC
+6. In the "Subnets" section, select your private subnets
+7. In the "Security groups" section, select a security group that allows the required traffic
+8. In the "Policy" section, select "Full access"
+9. Click "Create endpoint"
+
+#### RDS VPC Endpoint
+
+1. Navigate to the VPC service's "Endpoints" section
+2. Click "Create endpoint"
+3. In the "Service category" section, select "AWS services"
+4. In the search box, enter "rds", then select "com.amazonaws.<your-region>.rds" service
+5. Select your VPC
+6. In the "Subnets" section, select your private subnets
+7. In the "Security groups" section, select a security group that allows the required traffic
+8. In the "Policy" section, select "Full access"
+9. Click "Create endpoint"
+
+### Step 4: Create S3 Bucket
+
+1. Navigate to the S3 service
+2. Click "Create bucket"
+3. Enter a bucket name (e.g., `aurora-log-backup-{account-id}`)
+4. Select the appropriate region
+5. Keep default settings or adjust as needed
+6. In the "Server-side encryption" section, select "Enable" and choose "Amazon S3 key (SSE-S3)"
+7. Click "Create bucket"
+8. After creation, navigate to the bucket's "Management" tab
+9. In the "Lifecycle rules" section, click "Create lifecycle rule"
+10. Enter a rule name (e.g., `expire-old-logs`)
+11. Set expiration time to 90 days
+12. Click "Create rule"
+
+### Step 5: Create DynamoDB Table
+
+1. Navigate to the DynamoDB service
+2. Click "Create table"
+3. Enter a table name (e.g., `aurora-log-files`)
+4. Set the partition key to `DBInstanceIdentifier` (type: String)
+5. Set the sort key to `LogFileName` (type: String)
+6. Click "Create table"
+7. After creation, click the table name to enter the table details page
+8. In the "Additional settings" tab, find the "Time to Live (TTL)" section
+9. Click "Enable TTL"
+10. In the TTL attribute field, enter `ExpirationTime`
+11. Click "Save"
+
+### Step 6: Create SQS Queue
+
+1. Navigate to the SQS service
+2. Click "Create queue"
+3. Select "Standard queue"
+4. Enter a queue name (e.g., `aurora-db-instances`)
+5. In the "Configuration" section, set "Visibility timeout" to 300 seconds
+6. Set "Message retention period" to 24 hours (86400 seconds)
+7. Click "Create queue"
+8. After creation, note the queue's ARN
+
+### Step 7: Create IAM Roles and Policies
+
+Create the necessary IAM roles and policies for each Lambda function:
+
+1. Lambda VPC access policy
+2. DB Scanner role and policy
+3. Log Detector role and policy
+4. Log Downloader role and policy
+
+Each role needs appropriate permissions to access the relevant AWS services and resources.
+
+### Step 8: Create Security Group
+
+Create a security group for Lambda functions, allowing required outbound traffic.
+
+### Step 9: Create Lambda Functions
+
+Create three Lambda functions:
+
+1. DB Scanner Lambda
+2. Log Detector Lambda
+3. Log Downloader Lambda
+
+Each function should use the appropriate container image, memory settings, timeout settings, environment variables, and IAM role.
+
+### Step 10: Create Event Source Mappings
+
+#### SQS Event Source Mapping for Log Detector
+
+1. Navigate to the Lambda service, select the Log Detector function
+2. Click "Add trigger", select "SQS"
+3. Select the previously created SQS queue
+4. Set batch size to 10 (or adjust as needed)
+5. Click "Add"
+
+#### DynamoDB Event Source Mapping for Log Downloader
+
+1. Navigate to the Lambda service, select the Log Downloader function
+2. Click "Add trigger", select "DynamoDB"
+3. Select the previously created DynamoDB table
+4. Set "Starting position" to "Latest"
+5. Set batch size to 10 (or adjust as needed)
+6. Click "Add"
+
+### Step 11: Create EventBridge Rule
+
+1. Navigate to the EventBridge service
+2. Click "Create rule"
+3. Enter a rule name (e.g., `aurora-db-scanner-schedule`)
+4. Select "Schedule" as the rule type
+5. Set the schedule expression (e.g., `rate(15 minutes)`)
+6. In the "Targets" section, select "Lambda function"
+7. Select the DB Scanner Lambda function
+8. Click "Create"
+
 ## Configuration
 
 Configuration values are stored in the Pulumi stack configuration files:
@@ -228,6 +443,63 @@ Configuration values are stored in the Pulumi stack configuration files:
 - `infrastructure/aurora-log-backup-lab-stack/Pulumi.dev.yaml`
 
 You can modify these files to customize the deployment.
+
+### Pulumi Configuration Parameters
+
+| Parameter | Description | Default Value | Example |
+|-----------|-------------|---------------|---------|
+| aws:region | AWS region | - | ap-southeast-1 |
+| backup-solution:dbScannerMemory | DB Scanner Lambda memory size (MB) | 512 | 512 |
+| backup-solution:dbScannerTimeout | DB Scanner Lambda timeout (seconds) | 60 | 60 |
+| backup-solution:logDetectorMemory | Log Detector Lambda memory size (MB) | 1024 | 1024 |
+| backup-solution:logDetectorTimeout | Log Detector Lambda timeout (seconds) | 300 | 300 |
+| backup-solution:logDownloaderMemory | Log Downloader Lambda memory size (MB) | 1024 | 1024 |
+| backup-solution:logDownloaderTimeout | Log Downloader Lambda timeout (seconds) | 300 | 300 |
+| backup-solution:sqsVisibilityTimeout | SQS message visibility timeout (seconds) | 300 | 300 |
+| backup-solution:lambdaBatchSize | Lambda event source mapping batch size | 10 | 10 |
+| backup-solution:eventBridgeSchedule | EventBridge rule schedule expression | rate(15 minutes) | rate(15 minutes) |
+| backup-solution:s3LogPrefix | S3 log file prefix | aurora-logs | aurora-logs |
+| backup-solution:publishLambdaVersions | Whether to publish Lambda versions | true | true |
+| backup-solution:backupLogTypes | Log types to backup (comma-separated) | audit | audit,error,instance |
+| backup-solution:instanceEngine | DB instance engine types to process (comma-separated) | aurora-mysql | aurora-mysql,aurora-postgresql |
+| backup-solution:blackList | DB instance IDs to exclude (comma-separated) | - | instance1,instance2 |
+| backup-solution:ttlDays | DynamoDB record TTL days | 2 | 3 |
+| backup-solution:dbScannerImageVersion | DB Scanner image version | - | v1.0.6 |
+| backup-solution:logDetectorImageVersion | Log Detector image version | - | v1.0.6 |
+| backup-solution:logDownloaderImageVersion | Log Downloader image version | - | v1.0.6 |
+| backup-solution:environment | Environment name | dev | dev |
+| backup-solution:owner | Owner | - | zzhe |
+| backup-solution:project | Project name | - | aurora-audit-log-backup-lab |
+
+### Lambda Environment Variables
+
+#### DB Scanner Lambda
+
+| Environment Variable | Description | Default Value | Example |
+|---------------------|-------------|---------------|---------|
+| SQS_QUEUE_URL | SQS queue URL | - | https://sqs.ap-southeast-1.amazonaws.com/123456789012/aurora-db-instances |
+| LOG_LEVEL | Log level | error | debug |
+| INSTANCE_ENGINE | DB instance engine types to process (comma-separated) | aurora-mysql | aurora-mysql,aurora-postgresql |
+| BLACK_LIST | DB instance IDs to exclude (comma-separated) | - | instance1,instance2 |
+
+#### Log Detector Lambda
+
+| Environment Variable | Description | Default Value | Example |
+|---------------------|-------------|---------------|---------|
+| DYNAMODB_TABLE_NAME | DynamoDB table name | - | aurora-log-files |
+| LOG_LEVEL | Log level | error | debug |
+| BACKUP_LOGS | Log types to backup (comma-separated) | audit | audit,error,instance |
+| TTL_DAYS | DynamoDB record TTL days | 5 | 3 |
+
+#### Log Downloader Lambda
+
+| Environment Variable | Description | Default Value | Example |
+|---------------------|-------------|---------------|---------|
+| DYNAMODB_TABLE_NAME | DynamoDB table name | - | aurora-log-files |
+| S3_BUCKET_NAME | S3 bucket name | - | aurora-log-backup-123456789012 |
+| S3_PREFIX | S3 log file prefix | aurora-logs | aurora-logs |
+| LOG_LEVEL | Log level | error | debug |
+| TTL_DAYS | DynamoDB record TTL days | 5 | 3 |
 
 ### Log Backup Configuration
 
@@ -535,3 +807,30 @@ The Makefile provides the following commands for managing Lambda container image
 - `make clean`: Clean up Docker images
 - `make update-pulumi-config`: Update Pulumi config with new image versions
 - `make build-and-push-versioned VERSION=v1.0.0`: Build and push images with a specific version tag and update Pulumi config
+
+## Monitoring and Troubleshooting
+
+### Monitoring Tools
+
+1. **CloudWatch Logs**: View Lambda function logs
+2. **X-Ray Tracing**: Analyze detailed execution information
+3. **CloudWatch Metrics**: Monitor execution time, memory usage, and error rates
+4. **DynamoDB Console**: View records and TTL status in the table
+5. **S3 Console**: Verify log files have been successfully uploaded
+
+### Common Issues
+
+1. **Lambda Function Timeouts**: Increase function timeout settings or optimize code
+2. **Insufficient Memory**: Increase function memory allocation
+3. **Permission Issues**: Check IAM roles and policies
+4. **VPC Configuration Problems**: Ensure Lambda functions can access required AWS services
+5. **DynamoDB TTL Not Working**: Ensure TTL attribute is correctly set to `ExpirationTime`
+
+## Data Flow
+
+1. EventBridge rule periodically triggers the DB Scanner Lambda
+2. DB Scanner Lambda scans Aurora database instances and sends instance IDs to SQS queue
+3. Log Detector Lambda receives instance IDs from the queue, detects new log files, and stores metadata in DynamoDB
+4. DynamoDB streams trigger the Log Downloader Lambda
+5. Log Downloader Lambda downloads log files and uploads them to S3 bucket
+6. Log Downloader Lambda updates record status in DynamoDB
