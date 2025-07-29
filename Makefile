@@ -30,67 +30,83 @@ build-and-push-versioned:
 	docker push $(LOG_DETECTOR_REPO):$(VERSION)
 	docker push $(LOG_DOWNLOADER_REPO):$(VERSION)
 	
-	# Update Pulumi configuration with new version
+	# Update Pulumi configuration with the new version
+	@echo "Updating Pulumi configuration with version $(VERSION)..."
+	$(MAKE) update-pulumi-config VERSION=$(VERSION)
+
+# Update Pulumi configuration with the specified version
+update-pulumi-config:
+	@echo "Updating Pulumi configuration for backup-solution-stack with version $(VERSION)"
 	cd infrastructure/backup-solution-stack && \
 	pulumi config set backup-solution:dbScannerImageVersion $(VERSION) && \
 	pulumi config set backup-solution:logDetectorImageVersion $(VERSION) && \
 	pulumi config set backup-solution:logDownloaderImageVersion $(VERSION)
+	@echo "Pulumi configuration updated successfully"
 
-# Deploy all stacks in order
-deploy-all: deploy-ecr deploy-network deploy-aurora deploy-backup deploy-ec2
+# Build Lambda container images locally
+build:
+	@echo "Building Lambda container images locally"
+	docker build -t aurora-db-scanner:local ./lambdas/dbscanner
+	docker build -t aurora-log-detector:local ./lambdas/logdetector
+	docker build -t aurora-log-downloader:local ./lambdas/logdownloader
 
-# Deploy individual stacks
-deploy-ecr:
-	cd infrastructure/ecr-stack && pulumi up --yes
+# Get ECR repository URLs from the ECR stack
+get-ecr-urls:
+	@echo "Getting ECR repository URLs from the ECR stack"
+	@cd infrastructure/ecr-stack && pulumi stack output dbScannerRepositoryUrl
+	@cd infrastructure/ecr-stack && pulumi stack output logDetectorRepositoryUrl
+	@cd infrastructure/ecr-stack && pulumi stack output logDownloaderRepositoryUrl
 
-deploy-network:
-	cd infrastructure/network-stack && pulumi up --yes
+# Push Lambda container images to ECR
+push-images:
+	@echo "Pushing Lambda container images to ECR"
+	$(eval DB_SCANNER_REPO := $(shell cd infrastructure/ecr-stack && pulumi stack output dbScannerRepositoryUrl))
+	$(eval LOG_DETECTOR_REPO := $(shell cd infrastructure/ecr-stack && pulumi stack output logDetectorRepositoryUrl))
+	$(eval LOG_DOWNLOADER_REPO := $(shell cd infrastructure/ecr-stack && pulumi stack output logDownloaderRepositoryUrl))
+	
+	docker tag aurora-db-scanner:local $(DB_SCANNER_REPO):latest
+	docker tag aurora-log-detector:local $(LOG_DETECTOR_REPO):latest
+	docker tag aurora-log-downloader:local $(LOG_DOWNLOADER_REPO):latest
+	
+	aws ecr get-login-password --region $$(aws configure get region) | docker login --username AWS --password-stdin $$(echo $(DB_SCANNER_REPO) | cut -d'/' -f1)
+	
+	docker push $(DB_SCANNER_REPO):latest
+	docker push $(LOG_DETECTOR_REPO):latest
+	docker push $(LOG_DOWNLOADER_REPO):latest
 
-deploy-aurora: deploy-network
-	cd infrastructure/aurora-cluster-stack && pulumi up --yes
+# Clean up Docker images
+clean:
+	@echo "Cleaning up Docker images"
+	docker rmi -f aurora-db-scanner:local || true
+	docker rmi -f aurora-log-detector:local || true
+	docker rmi -f aurora-log-downloader:local || true
+	docker rmi -f $(shell cd infrastructure/ecr-stack && pulumi stack output dbScannerRepositoryUrl):latest || true
+	docker rmi -f $(shell cd infrastructure/ecr-stack && pulumi stack output logDetectorRepositoryUrl):latest || true
+	docker rmi -f $(shell cd infrastructure/ecr-stack && pulumi stack output logDownloaderRepositoryUrl):latest || true
 
-deploy-backup: deploy-network
-	cd infrastructure/backup-solution-stack && pulumi up --yes
+# Display version information
+version-info:
+	@echo "Current Lambda image versions:"
+	@echo "DB Scanner: $$(cd infrastructure/backup-solution-stack && pulumi config get backup-solution:dbScannerImageVersion)"
+	@echo "Log Detector: $$(cd infrastructure/backup-solution-stack && pulumi config get backup-solution:logDetectorImageVersion)"
+	@echo "Log Downloader: $$(cd infrastructure/backup-solution-stack && pulumi config get backup-solution:logDownloaderImageVersion)"
 
-deploy-ec2: deploy-network deploy-aurora
-	cd infrastructure/ec2-testing-stack && pulumi up --yes
+# Increment version (patch level)
+increment-version:
+	@echo "Incrementing version..."
+	$(eval CURRENT_VERSION := $(shell cd infrastructure/backup-solution-stack && pulumi config get backup-solution:dbScannerImageVersion))
+	$(eval MAJOR := $(shell echo $(CURRENT_VERSION) | cut -d'.' -f1 | tr -d 'v'))
+	$(eval MINOR := $(shell echo $(CURRENT_VERSION) | cut -d'.' -f2))
+	$(eval PATCH := $(shell echo $(CURRENT_VERSION) | cut -d'.' -f3))
+	$(eval NEW_PATCH := $(shell echo $$(($(PATCH) + 1))))
+	$(eval NEW_VERSION := v$(MAJOR).$(MINOR).$(NEW_PATCH))
+	@echo "Current version: $(CURRENT_VERSION), New version: $(NEW_VERSION)"
+	$(MAKE) build-and-push-versioned VERSION=$(NEW_VERSION)
 
-# Destroy all stacks in reverse order
-destroy-all: destroy-ec2 destroy-backup destroy-aurora destroy-network destroy-ecr
+# Full workflow: build, push, and update configuration
+deploy-new-version:
+	@echo "Starting full deployment workflow..."
+	$(MAKE) increment-version
+	@echo "Deployment workflow completed. Run 'pulumi up' in the backup-solution-stack directory to apply changes."
 
-# Destroy individual stacks
-destroy-ec2:
-	cd infrastructure/ec2-testing-stack && pulumi destroy --yes
-
-destroy-backup:
-	cd infrastructure/backup-solution-stack && pulumi destroy --yes
-
-destroy-aurora:
-	cd infrastructure/aurora-cluster-stack && pulumi destroy --yes
-
-destroy-network:
-	cd infrastructure/network-stack && pulumi destroy --yes
-
-destroy-ecr:
-	cd infrastructure/ecr-stack && pulumi destroy --yes
-
-# Initialize all stacks
-init-all: init-ecr init-network init-aurora init-backup init-ec2
-
-# Initialize individual stacks
-init-ecr:
-	cd infrastructure/ecr-stack && pulumi stack init dev
-
-init-network:
-	cd infrastructure/network-stack && pulumi stack init dev
-
-init-aurora:
-	cd infrastructure/aurora-cluster-stack && pulumi stack init dev
-
-init-backup:
-	cd infrastructure/backup-solution-stack && pulumi stack init dev
-
-init-ec2:
-	cd infrastructure/ec2-testing-stack && pulumi stack init dev
-
-.PHONY: build-and-push-versioned deploy-all deploy-ecr deploy-network deploy-aurora deploy-backup deploy-ec2 destroy-all destroy-ec2 destroy-backup destroy-aurora destroy-network destroy-ecr init-all init-ecr init-network init-aurora init-backup init-ec2
+.PHONY: build-and-push-versioned update-pulumi-config build get-ecr-urls push-images clean version-info increment-version deploy-new-version

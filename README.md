@@ -380,11 +380,12 @@ The project now includes an enhanced unified stress testing script (`aurora_stre
 
 - **Workload Intensity Control**: Predefined intensity levels with different parameter sets:
   ```bash
-  ./aurora_stress_test.sh --intensity <low|medium|high|custom> --writer-endpoint <writer-endpoint>
+  ./aurora_stress_test.sh --intensity <low|medium|high|extreme> --writer-endpoint <writer-endpoint>
   ```
   - **Low**: 5 threads, 5 tables, 100K rows, 60s duration
   - **Medium**: 20 threads, 20 tables, 500K rows, 180s duration
-  - **High**: 25 threads, 25 tables, 1M rows, 300s duration
+  - **High**: 50 threads, 50 tables, 1M rows, 300s duration
+  - **Extreme**: 100 threads, 100 tables, 2M rows, 600s duration
 
 - **Fine-grained Parameter Control**: Customize test parameters:
   ```bash
@@ -392,6 +393,60 @@ The project now includes an enhanced unified stress testing script (`aurora_stre
   ```
 
 - **Table Consistency Check**: Automatically adjusts if requested tables don't exist
+
+### Audit Log Generation Features
+
+The enhanced stress test script now includes dedicated features for generating audit logs:
+
+- **Audit Log Focus Mode**: Enable intensive audit log generation:
+  ```bash
+  ./aurora_stress_test.sh --audit-log-focus --writer-endpoint <writer-endpoint>
+  ```
+
+- **DDL Operations**: Automatically generates schema changes (CREATE, ALTER, DROP) at configurable intervals:
+  ```bash
+  ./aurora_stress_test.sh --audit-log-focus --ddl-frequency 15 --writer-endpoint <writer-endpoint>
+  ```
+
+- **User Management Operations**: Performs DCL operations (CREATE USER, GRANT, REVOKE) to generate additional audit logs:
+  ```bash
+  ./aurora_stress_test.sh --audit-log-focus --writer-endpoint <writer-endpoint>
+  ```
+
+- **Selective Operation Control**: Enable or disable specific types of operations:
+  ```bash
+  ./aurora_stress_test.sh --audit-log-focus --no-schema-changes --no-user-operations --writer-endpoint <writer-endpoint>
+  ```
+
+- **Multiple Workload Types**: Run all available workload types in sequence:
+  ```bash
+  ./aurora_stress_test.sh --workload-type all --audit-log-focus --writer-endpoint <writer-endpoint>
+  ```
+
+### Example: Maximum Audit Log Generation
+
+To generate the maximum amount of audit logs:
+
+```bash
+./aurora_stress_test.sh \
+  --mode all \
+  --target-instance both \
+  --intensity extreme \
+  --audit-log-focus \
+  --ddl-frequency 10 \
+  --workload-type all \
+  --writer-endpoint your-aurora-cluster-endpoint.region.rds.amazonaws.com \
+  --reader-endpoint your-aurora-cluster-ro-endpoint.region.rds.amazonaws.com
+```
+
+This will:
+- Set up the database environment
+- Run all workload types with extreme intensity (100 threads, 100 tables)
+- Generate continuous DDL operations every 10 seconds
+- Create and manage users to generate DCL audit events
+- Perform intensive DML operations on dedicated audit tables
+- Target both writer and reader instances
+- Clean up all resources when complete
 
 ### Testing High Intensity on Both Reader and Writer Instances
 

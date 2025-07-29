@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/zhang1980s/aurora-audit-log-backup-lab/lambdas/logdetector/pkg/errors"
@@ -14,6 +15,7 @@ type Config struct {
 	LogLevel          string
 	BackupLogTypes    []string // Types of logs to backup (audit, error, instance)
 	Region            string
+	TTLDays           int // Number of days for TTL expiration
 }
 
 // Load loads configuration from environment variables
@@ -43,6 +45,18 @@ func Load() (*Config, error) {
 		cfg.BackupLogTypes = append(cfg.BackupLogTypes, strings.TrimSpace(logType))
 	}
 
+	// Parse TTL days (default: 7 days)
+	ttlDaysStr := os.Getenv("TTL_DAYS")
+	if ttlDaysStr == "" {
+		cfg.TTLDays = 7
+	} else {
+		ttlDays, err := strconv.Atoi(ttlDaysStr)
+		if err != nil {
+			return nil, errors.Wrap(err, "invalid TTL_DAYS")
+		}
+		cfg.TTLDays = ttlDays
+	}
+
 	// Validate required configuration
 	if cfg.DynamoDBTableName == "" {
 		return nil, errors.Wrap(errors.ErrConfiguration, "DYNAMODB_TABLE_NAME environment variable is required")
@@ -54,11 +68,12 @@ func Load() (*Config, error) {
 // String returns a string representation of the configuration
 func (c *Config) String() string {
 	return fmt.Sprintf(
-		"Config{DynamoDBTableName: %s, LogLevel: %s, BackupLogTypes: %v, Region: %s}",
+		"Config{DynamoDBTableName: %s, LogLevel: %s, BackupLogTypes: %v, Region: %s, TTLDays: %d}",
 		c.DynamoDBTableName,
 		c.LogLevel,
 		c.BackupLogTypes,
 		c.Region,
+		c.TTLDays,
 	)
 }
 

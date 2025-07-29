@@ -29,7 +29,6 @@ func main() {
 
 		// Export Aurora outputs
 		ctx.Export("auroraSecurityGroupId", auroraResources.AuroraSecurityGroup.ID())
-		ctx.Export("auditLogBucketName", auroraResources.AuditLogBucket.ID())
 		ctx.Export("auroraEndpoint", auroraResources.AuroraCluster.Endpoint)
 		ctx.Export("auroraReadEndpoint", auroraResources.AuroraCluster.ReaderEndpoint)
 		ctx.Export("auroraPrimaryId", auroraResources.AuroraPrimary.ID())

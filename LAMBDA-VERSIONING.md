@@ -13,13 +13,13 @@ The project uses AWS Lambda functions with container images. To ensure proper ve
 
 ## Configuration
 
-Version parameters are stored in `infrastructure/aurora-log-backup-lab-stack/Pulumi.dev.yaml`:
+Version parameters are stored in `infrastructure/backup-solution-stack/Pulumi.dev.yaml`:
 
 ```yaml
-aurora-audit-log-backup-lab:dbScannerImageVersion: "v1.0.0"
-aurora-audit-log-backup-lab:logDetectorImageVersion: "v1.0.0"
-aurora-audit-log-backup-lab:logDownloaderImageVersion: "v1.0.0"
-aurora-audit-log-backup-lab:publishLambdaVersions: "true"
+backup-solution:dbScannerImageVersion: "v1.0.0"
+backup-solution:logDetectorImageVersion: "v1.0.0"
+backup-solution:logDownloaderImageVersion: "v1.0.0"
+backup-solution:publishLambdaVersions: "true"
 ```
 
 ## How It Works
@@ -36,7 +36,9 @@ aurora-audit-log-backup-lab:publishLambdaVersions: "true"
 To update Lambda functions with new code:
 
 1. Make your code changes to the Lambda function(s)
-2. Build and push with a specific version:
+2. Use one of the following methods to build, push, and update configuration:
+
+#### Method 1: Specify a Version Manually
 
 ```bash
 make build-and-push-versioned VERSION=v1.0.1
@@ -47,10 +49,33 @@ This will:
 - Push the images to ECR
 - Update the Pulumi configuration with the new version
 
+#### Method 2: Automatically Increment Version
+
+```bash
+make increment-version
+```
+
+This will:
+- Read the current version from Pulumi configuration
+- Increment the patch version (e.g., v1.0.0 → v1.0.1)
+- Build and push images with the new version
+- Update the Pulumi configuration with the new version
+
+#### Method 3: Full Deployment Workflow
+
+```bash
+make deploy-new-version
+```
+
+This will:
+- Increment the version automatically
+- Build and push images with the new version
+- Update the Pulumi configuration with the new version
+
 3. Deploy with Pulumi:
 
 ```bash
-cd infrastructure/aurora-log-backup-lab-stack
+cd infrastructure/backup-solution-stack
 pulumi up
 ```
 
@@ -59,6 +84,35 @@ Pulumi will:
 - Update the Lambda function to use the new image
 - Create a new version of the Lambda function (if `publishLambdaVersions` is true)
 
+### Additional Makefile Targets
+
+The project includes several utility targets to help with Lambda versioning:
+
+- `update-pulumi-config`: Updates the Pulumi configuration with a specified version
+  ```bash
+  make update-pulumi-config VERSION=v1.0.1
+  ```
+
+- `version-info`: Displays the current Lambda image versions from Pulumi configuration
+  ```bash
+  make version-info
+  ```
+
+- `build`: Builds Lambda container images locally with the "local" tag
+  ```bash
+  make build
+  ```
+
+- `push-images`: Pushes locally built images to ECR with the "latest" tag
+  ```bash
+  make push-images
+  ```
+
+- `clean`: Removes local and ECR-tagged Docker images
+  ```bash
+  make clean
+  ```
+
 ### Rolling Back
 
 To roll back to a previous version:
@@ -66,8 +120,8 @@ To roll back to a previous version:
 1. Update the version in Pulumi.dev.yaml:
 
 ```bash
-cd infrastructure/aurora-log-backup-lab-stack
-pulumi config set aurora-audit-log-backup-lab:dbScannerImageVersion v1.0.0
+cd infrastructure/backup-solution-stack
+pulumi config set backup-solution:dbScannerImageVersion v1.0.0
 pulumi up
 ```
 

@@ -19,6 +19,7 @@ type Config struct {
 	RetryAttempts     int
 	RetryDelay        time.Duration
 	Region            string
+	TTLDays           int // Number of days for TTL expiration
 }
 
 // Load loads configuration from environment variables
@@ -76,6 +77,18 @@ func Load() (*Config, error) {
 		cfg.RetryDelay = time.Duration(delayMs) * time.Millisecond
 	}
 
+	// Parse TTL days (default: 7 days)
+	ttlDaysStr := os.Getenv("TTL_DAYS")
+	if ttlDaysStr == "" {
+		cfg.TTLDays = 7
+	} else {
+		ttlDays, err := strconv.Atoi(ttlDaysStr)
+		if err != nil {
+			return nil, errors.Wrap(err, "invalid TTL_DAYS")
+		}
+		cfg.TTLDays = ttlDays
+	}
+
 	// Validate required configuration
 	if cfg.DynamoDBTableName == "" {
 		return nil, errors.Wrap(errors.ErrConfiguration, "DYNAMODB_TABLE_NAME environment variable is required")
@@ -91,7 +104,7 @@ func Load() (*Config, error) {
 // String returns a string representation of the configuration
 func (c *Config) String() string {
 	return fmt.Sprintf(
-		"Config{DynamoDBTableName: %s, S3BucketName: %s, S3Prefix: %s, LogLevel: %s, DownloadTimeout: %v, RetryAttempts: %d, RetryDelay: %v, Region: %s}",
+		"Config{DynamoDBTableName: %s, S3BucketName: %s, S3Prefix: %s, LogLevel: %s, DownloadTimeout: %v, RetryAttempts: %d, RetryDelay: %v, Region: %s, TTLDays: %d}",
 		c.DynamoDBTableName,
 		c.S3BucketName,
 		c.S3Prefix,
@@ -100,5 +113,6 @@ func (c *Config) String() string {
 		c.RetryAttempts,
 		c.RetryDelay,
 		c.Region,
+		c.TTLDays,
 	)
 }

@@ -3,5 +3,5 @@ config:
   environment: dev
   project: aurora-audit-log-backup-lab
   owner: zzhe
-  ec2-stress-client:keyPairName: "keypair-sandbox0-sin-mymac.pem"
+  ec2-stress-client:keyPairName: "keypair-root-sin"
   ec2-stress-client:instanceType: "m8g.large"
