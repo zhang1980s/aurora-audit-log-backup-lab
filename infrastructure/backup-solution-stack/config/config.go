@@ -27,6 +27,7 @@ type LambdaConfig struct {
 	BackupLogTypes       string
 	InstanceEngine       string
 	BlackList            string
+	TTLDays              int
 }
 
 // ImageConfig represents the container image configuration
@@ -166,6 +167,16 @@ func LoadConfig(ctx *pulumi.Context) (*Config, error) {
 	// Get blacklisted instance IDs, default to empty if not specified
 	blackList := backupCfg.Get("blackList")
 
+	// Get TTL days, default to 3 if not specified
+	ttlDays := 3 // Default value
+	if ttlDaysStr := backupCfg.Get("ttlDays"); ttlDaysStr != "" {
+		var err error
+		ttlDays, err = strconv.Atoi(ttlDaysStr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid ttlDays: %v", err)
+		}
+	}
+
 	// Check if we should publish Lambda versions
 	publishVersions := false
 	if publishVersionsStr := backupCfg.Get("publishLambdaVersions"); publishVersionsStr == "true" {
@@ -207,6 +218,7 @@ func LoadConfig(ctx *pulumi.Context) (*Config, error) {
 			BackupLogTypes:       backupLogTypes,
 			InstanceEngine:       instanceEngine,
 			BlackList:            blackList,
+			TTLDays:              ttlDays,
 		},
 		Images: ImageConfig{
 			DBScannerVersion:     dbScannerImageVersion,

@@ -1,6 +1,8 @@
 package resources
 
 import (
+	"strconv"
+
 	"github.com/pulumi/pulumi-aws/sdk/v6/go/aws/cloudwatch"
 	"github.com/pulumi/pulumi-aws/sdk/v6/go/aws/dynamodb"
 	"github.com/pulumi/pulumi-aws/sdk/v6/go/aws/ec2"
@@ -520,7 +522,7 @@ func CreateBackupResources(ctx *pulumi.Context, cfg *config.Config, networkStack
 				"DYNAMODB_TABLE_NAME": dynamoTable.Name,
 				"LOG_LEVEL":           pulumi.String("error"),
 				"BACKUP_LOGS":         pulumi.String(cfg.Lambda.BackupLogTypes),
-				"TTL_DAYS":            pulumi.String("7"),
+				"TTL_DAYS":            pulumi.String(strconv.Itoa(cfg.Lambda.TTLDays)),
 			},
 		},
 		TracingConfig: &lambda.FunctionTracingConfigArgs{
@@ -570,7 +572,7 @@ func CreateBackupResources(ctx *pulumi.Context, cfg *config.Config, networkStack
 				"S3_BUCKET_NAME":      logBucket.ID(),
 				"S3_PREFIX":           pulumi.String(cfg.Lambda.S3LogPrefix),
 				"LOG_LEVEL":           pulumi.String("error"),
-				"TTL_DAYS":            pulumi.String("7"),
+				"TTL_DAYS":            pulumi.String(strconv.Itoa(cfg.Lambda.TTLDays)),
 			},
 		},
 		TracingConfig: &lambda.FunctionTracingConfigArgs{
