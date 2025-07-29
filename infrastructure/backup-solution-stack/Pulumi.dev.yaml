@@ -12,7 +12,7 @@ config:
   backup-solution:s3LogPrefix: "aurora-logs"
   backup-solution:publishLambdaVersions: "true"
   backup-solution:backupLogTypes: "audit,error,instance"
-  backup-solution:instanceEngine: "aurora-mysql,aurora"
+  backup-solution:instanceEngine: "aurora-mysql,aurora-postgresql"
   backup-solution:blackList: ""
   backup-solution:dbScannerImageVersion: "v1.0.6"
   backup-solution:logDetectorImageVersion: "v1.0.6"

@@ -157,10 +157,10 @@ func LoadConfig(ctx *pulumi.Context) (*Config, error) {
 		backupLogTypes = "audit" // Default to audit logs for backward compatibility
 	}
 
-	// Get instance engine types, default to "aurora-mysql,aurora" if not specified
+	// Get instance engine types, default to "aurora-mysql,aurora-postgresql" if not specified
 	instanceEngine := backupCfg.Get("instanceEngine")
 	if instanceEngine == "" {
-		instanceEngine = "aurora-mysql,aurora" // Default to Aurora MySQL for backward compatibility
+		instanceEngine = "aurora-mysql,aurora-postgresql" // Default to Aurora MySQL and PostgreSQL
 	}
 
 	// Get blacklisted instance IDs, default to empty if not specified
