@@ -468,8 +468,10 @@ func CreateBackupResources(ctx *pulumi.Context, cfg *config.Config, networkStack
 		},
 		Environment: &lambda.FunctionEnvironmentArgs{
 			Variables: pulumi.StringMap{
-				"SQS_QUEUE_URL": queue.Url,
-				"LOG_LEVEL":     pulumi.String("error"),
+				"SQS_QUEUE_URL":   queue.Url,
+				"LOG_LEVEL":       pulumi.String("error"),
+				"INSTANCE_ENGINE": pulumi.String(cfg.Lambda.InstanceEngine),
+				"BLACK_LIST":      pulumi.String(cfg.Lambda.BlackList),
 			},
 		},
 		TracingConfig: &lambda.FunctionTracingConfigArgs{

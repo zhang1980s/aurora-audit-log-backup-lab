@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"os"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/service/rds/types"
 	"github.com/aws/aws-xray-sdk-go/xray"
@@ -75,17 +77,53 @@ func (s *service) ScanAndQueueDBInstances(ctx context.Context, queueURL string) 
 	return len(auroraInstances), nil
 }
 
-// filterAuroraInstances filters for Aurora MySQL instances
+// filterAuroraInstances filters DB instances based on engine type and blacklist
 func (s *service) filterAuroraInstances(instances []types.DBInstance) []types.DBInstance {
-	s.logger.Debug("Filtering for Aurora MySQL instances")
+	s.logger.Debug("Filtering DB instances")
 
-	var auroraInstances []types.DBInstance
-	for _, instance := range instances {
-		// Check if it's an Aurora MySQL instance
-		if instance.Engine != nil && (*instance.Engine == "aurora-mysql" || *instance.Engine == "aurora") {
-			auroraInstances = append(auroraInstances, instance)
+	// Get allowed engine types from environment variable
+	allowedEngines := os.Getenv("INSTANCE_ENGINE")
+	if allowedEngines == "" {
+		// Default to Aurora MySQL if not specified
+		allowedEngines = "aurora-mysql,aurora"
+	}
+	engineList := strings.Split(allowedEngines, ",")
+
+	// Create a map for faster lookups
+	engineMap := make(map[string]bool)
+	for _, engine := range engineList {
+		engineMap[strings.TrimSpace(engine)] = true
+	}
+
+	// Get blacklisted instance IDs from environment variable
+	blacklist := os.Getenv("BLACK_LIST")
+	blacklistMap := make(map[string]bool)
+	if blacklist != "" {
+		blacklistItems := strings.Split(blacklist, ",")
+		for _, item := range blacklistItems {
+			blacklistMap[strings.TrimSpace(item)] = true
 		}
 	}
 
-	return auroraInstances
+	var filteredInstances []types.DBInstance
+	for _, instance := range instances {
+		// Skip if instance is in blacklist
+		if instance.DBInstanceIdentifier != nil && blacklistMap[*instance.DBInstanceIdentifier] {
+			s.logger.Infow("Skipping blacklisted instance", "instanceID", *instance.DBInstanceIdentifier)
+			continue
+		}
+
+		// Check if instance engine is in the allowed list
+		if instance.Engine != nil && engineMap[*instance.Engine] {
+			filteredInstances = append(filteredInstances, instance)
+		}
+	}
+
+	s.logger.Infow("Filtered instances",
+		"totalInstances", len(instances),
+		"filteredInstances", len(filteredInstances),
+		"allowedEngines", allowedEngines,
+		"blacklistCount", len(blacklistMap))
+
+	return filteredInstances
 }

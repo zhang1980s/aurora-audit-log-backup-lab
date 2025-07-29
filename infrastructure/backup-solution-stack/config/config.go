@@ -25,6 +25,8 @@ type LambdaConfig struct {
 	S3LogPrefix          string
 	PublishVersions      bool
 	BackupLogTypes       string
+	InstanceEngine       string
+	BlackList            string
 }
 
 // ImageConfig represents the container image configuration
@@ -155,6 +157,15 @@ func LoadConfig(ctx *pulumi.Context) (*Config, error) {
 		backupLogTypes = "audit" // Default to audit logs for backward compatibility
 	}
 
+	// Get instance engine types, default to "aurora-mysql,aurora" if not specified
+	instanceEngine := backupCfg.Get("instanceEngine")
+	if instanceEngine == "" {
+		instanceEngine = "aurora-mysql,aurora" // Default to Aurora MySQL for backward compatibility
+	}
+
+	// Get blacklisted instance IDs, default to empty if not specified
+	blackList := backupCfg.Get("blackList")
+
 	// Check if we should publish Lambda versions
 	publishVersions := false
 	if publishVersionsStr := backupCfg.Get("publishLambdaVersions"); publishVersionsStr == "true" {
@@ -194,6 +205,8 @@ func LoadConfig(ctx *pulumi.Context) (*Config, error) {
 			S3LogPrefix:          s3LogPrefix,
 			PublishVersions:      publishVersions,
 			BackupLogTypes:       backupLogTypes,
+			InstanceEngine:       instanceEngine,
+			BlackList:            blackList,
 		},
 		Images: ImageConfig{
 			DBScannerVersion:     dbScannerImageVersion,
