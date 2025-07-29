@@ -185,6 +185,13 @@ func (r *RDSRepository) UpdateLogFileRecord(ctx context.Context, record models.L
 		":humanReadableLastWritten": &types.AttributeValueMemberS{Value: record.HumanReadableLastWritten},
 	}
 
+	// Include ScanCount if it exists
+	if record.ScanCount > 0 {
+		updateExpression += ", #scanCount = :scanCount"
+		expressionAttributeNames["#scanCount"] = "ScanCount"
+		expressionAttributeValues[":scanCount"] = &types.AttributeValueMemberN{Value: strconv.Itoa(record.ScanCount)}
+	}
+
 	// Include LastBackup if it exists
 	if record.LastBackup > 0 {
 		updateExpression += ", #lastBackup = :lastBackup, #humanReadableLastBackup = :humanReadableLastBackup"
@@ -197,6 +204,20 @@ func (r *RDSRepository) UpdateLogFileRecord(ctx context.Context, record models.L
 			record.HumanReadableLastBackup = time.UnixMilli(record.LastBackup).Format(time.RFC3339)
 		}
 		expressionAttributeValues[":humanReadableLastBackup"] = &types.AttributeValueMemberS{Value: record.HumanReadableLastBackup}
+	}
+
+	// Include ExpirationTime if it exists
+	if record.ExpirationTime > 0 {
+		updateExpression += ", #expirationTime = :expirationTime, #humanReadableExpiration = :humanReadableExpiration"
+		expressionAttributeNames["#expirationTime"] = "ExpirationTime"
+		expressionAttributeNames["#humanReadableExpiration"] = "HumanReadableExpiration"
+		expressionAttributeValues[":expirationTime"] = &types.AttributeValueMemberN{Value: strconv.FormatInt(record.ExpirationTime, 10)}
+
+		// Generate human-readable timestamp if not already set
+		if record.HumanReadableExpiration == "" {
+			record.HumanReadableExpiration = time.UnixMilli(record.ExpirationTime).Format(time.RFC3339)
+		}
+		expressionAttributeValues[":humanReadableExpiration"] = &types.AttributeValueMemberS{Value: record.HumanReadableExpiration}
 	}
 
 	// Include SHA256Checksum if it exists

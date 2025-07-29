@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/hex"
+	"os"
 	"strconv"
 	"time"
 
@@ -70,15 +71,38 @@ func (r *DynamoDBRepository) UpdateLastBackup(ctx context.Context, dbInstanceID,
 	xray.AddAnnotation(ctx, "log_file_name", logFileName)
 	xray.AddAnnotation(ctx, "table_name", r.tableName)
 
-	// Use milliseconds for timestamp consistency with LastWritten
-	nowMillis := time.Now().UnixMilli()
-	humanReadableTime := time.Now().Format(time.RFC3339)
+	// Get TTL_DAYS from environment variable (default to 7 if not set)
+	ttlDaysStr := os.Getenv("TTL_DAYS")
+	ttlDays := 7
+	if ttlDaysStr != "" {
+		var err error
+		ttlDays, err = strconv.Atoi(ttlDaysStr)
+		if err != nil {
+			r.logger.Warnw("Invalid TTL_DAYS value, using default of 7 days", "value", ttlDaysStr, "error", err)
+			ttlDays = 7
+		}
+	}
 
-	xray.AddMetadata(ctx, "timestamp_millis", nowMillis)
-	xray.AddMetadata(ctx, "timestamp_human", humanReadableTime)
-	r.logger.Debugw("Setting LastBackup timestamp",
-		"milliseconds", nowMillis,
-		"humanReadable", humanReadableTime)
+	// Calculate current time and expiration time (current time + TTL_DAYS)
+	now := time.Now()
+	currentMillis := now.UnixMilli()
+	humanReadableCurrentTime := now.Format(time.RFC3339)
+
+	expirationTime := now.AddDate(0, 0, ttlDays)
+	expirationMillis := expirationTime.UnixMilli()
+	humanReadableExpirationTime := expirationTime.Format(time.RFC3339)
+
+	xray.AddMetadata(ctx, "ttl_days", ttlDays)
+	xray.AddMetadata(ctx, "current_millis", currentMillis)
+	xray.AddMetadata(ctx, "current_human", humanReadableCurrentTime)
+	xray.AddMetadata(ctx, "expiration_millis", expirationMillis)
+	xray.AddMetadata(ctx, "expiration_human", humanReadableExpirationTime)
+	r.logger.Debugw("Setting backup timestamps",
+		"ttlDays", ttlDays,
+		"currentMillis", currentMillis,
+		"humanReadableCurrent", humanReadableCurrentTime,
+		"expirationMillis", expirationMillis,
+		"humanReadableExpiration", humanReadableExpirationTime)
 
 	// Get the record to retrieve the SHA256 checksum
 	ctx, getItemSubsegment := xray.BeginSubsegment(ctx, "GetItem")
@@ -107,10 +131,12 @@ func (r *DynamoDBRepository) UpdateLastBackup(ctx context.Context, dbInstanceID,
 	}
 
 	// Create update expression with SHA256 checksum if available
-	updateExpression := "SET LastBackup = :lastBackup, HumanReadableLastBackup = :humanReadable"
+	updateExpression := "SET LastBackup = :lastBackup, HumanReadableLastBackup = :humanReadableLastBackup, ExpirationTime = :expirationTime, HumanReadableExpiration = :humanReadableExpiration"
 	expressionAttributeValues := map[string]types.AttributeValue{
-		":lastBackup":    &types.AttributeValueMemberN{Value: strconv.FormatInt(nowMillis, 10)},
-		":humanReadable": &types.AttributeValueMemberS{Value: humanReadableTime},
+		":lastBackup":              &types.AttributeValueMemberN{Value: strconv.FormatInt(currentMillis, 10)},
+		":humanReadableLastBackup": &types.AttributeValueMemberS{Value: humanReadableCurrentTime},
+		":expirationTime":          &types.AttributeValueMemberN{Value: strconv.FormatInt(expirationMillis, 10)},
+		":humanReadableExpiration": &types.AttributeValueMemberS{Value: humanReadableExpirationTime},
 	}
 
 	// Add SHA256 checksum if provided

@@ -11,9 +11,12 @@ type LogFileRecord struct {
 	Size                     int64  `dynamodbav:"Size"`
 	LastWritten              int64  `dynamodbav:"LastWritten"` // Milliseconds since epoch (from RDS API)
 	HumanReadableLastWritten string `dynamodbav:"HumanReadableLastWritten,omitempty"`
-	LastBackup               int64  `dynamodbav:"LastBackup,omitempty"` // Milliseconds since epoch
+	LastBackup               int64  `dynamodbav:"LastBackup,omitempty"` // Milliseconds since epoch (when backup actually happened)
 	HumanReadableLastBackup  string `dynamodbav:"HumanReadableLastBackup,omitempty"`
+	ExpirationTime           int64  `dynamodbav:"ExpirationTime,omitempty"` // Milliseconds since epoch (TTL field for automatic deletion)
+	HumanReadableExpiration  string `dynamodbav:"HumanReadableExpiration,omitempty"`
 	SHA256Checksum           string `dynamodbav:"SHA256Checksum,omitempty"` // SHA256 checksum of the log file
+	ScanCount                int    `dynamodbav:"ScanCount,omitempty"`      // Counter incremented each time the log file is scanned
 }
 
 // FormatTime converts a Unix millisecond timestamp to a human-readable format

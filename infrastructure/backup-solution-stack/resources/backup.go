@@ -19,7 +19,9 @@ type BackupResources struct {
 	LogBucket                *s3.Bucket
 	DynamoDBTable            *dynamodb.Table
 	SQSQueue                 *sqs.Queue
-	LambdaRole               *iam.Role
+	DBScannerRole            *iam.Role
+	LogDetectorRole          *iam.Role
+	LogDownloaderRole        *iam.Role
 	DBScannerLambda          *lambda.Function
 	DBScannerLambdaAlias     *lambda.Alias
 	LogDetectorLambda        *lambda.Function
@@ -35,16 +37,16 @@ func CreateBackupResources(ctx *pulumi.Context, cfg *config.Config, networkStack
 	vpcIdOutput := networkStack.GetOutput(pulumi.String("vpcId"))
 	privateSubnet1IdOutput := networkStack.GetOutput(pulumi.String("privateSubnet1Id"))
 	privateSubnet2IdOutput := networkStack.GetOutput(pulumi.String("privateSubnet2Id"))
-	
+
 	// Convert AnyOutput to StringOutput for use in resource arguments
 	vpcId := vpcIdOutput.ApplyT(func(v interface{}) string {
 		return v.(string)
 	}).(pulumi.StringOutput)
-	
+
 	privateSubnet1Id := privateSubnet1IdOutput.ApplyT(func(v interface{}) string {
 		return v.(string)
 	}).(pulumi.StringOutput)
-	
+
 	privateSubnet2Id := privateSubnet2IdOutput.ApplyT(func(v interface{}) string {
 		return v.(string)
 	}).(pulumi.StringOutput)
@@ -98,7 +100,11 @@ func CreateBackupResources(ctx *pulumi.Context, cfg *config.Config, networkStack
 		BillingMode:    pulumi.String("PAY_PER_REQUEST"),
 		StreamEnabled:  pulumi.Bool(true),
 		StreamViewType: pulumi.String("NEW_AND_OLD_IMAGES"),
-		Tags:           CreateResourceTags(ctx, cfg.Tags, "aurora-log-files"),
+		Ttl: &dynamodb.TableTtlArgs{
+			AttributeName: pulumi.String("ExpirationTime"),
+			Enabled:       pulumi.Bool(true),
+		},
+		Tags: CreateResourceTags(ctx, cfg.Tags, "aurora-log-files"),
 	})
 	if err != nil {
 		return nil, err
@@ -114,86 +120,12 @@ func CreateBackupResources(ctx *pulumi.Context, cfg *config.Config, networkStack
 		return nil, err
 	}
 
-	// Create IAM role for Lambda functions
-	lambdaRole, err := iam.NewRole(ctx, "aurora-log-backup-lambda-role", &iam.RoleArgs{
-		AssumeRolePolicy: pulumi.String(`{
-			"Version": "2012-10-17",
-			"Statement": [{
-				"Action": "sts:AssumeRole",
-				"Principal": {
-					"Service": "lambda.amazonaws.com"
-				},
-				"Effect": "Allow",
-				"Sid": ""
-			}]
-		}`),
-		Tags: CreateResourceTags(ctx, cfg.Tags, "aurora-log-backup-lambda-role"),
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// Attach policies to Lambda role
-	_, err = iam.NewRolePolicyAttachment(ctx, "lambda-basic-execution", &iam.RolePolicyAttachmentArgs{
-		Role:      lambdaRole.Name,
-		PolicyArn: pulumi.String("arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"),
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// Create custom policy for Lambda functions
-	lambdaPolicy, err := iam.NewPolicy(ctx, "aurora-log-backup-lambda-policy", &iam.PolicyArgs{
-		Description: pulumi.String("Policy for Aurora log backup Lambda functions"),
+	// Create common IAM role for Lambda VPC access
+	commonVpcPolicy, err := iam.NewPolicy(ctx, "lambda-vpc-access-policy", &iam.PolicyArgs{
+		Description: pulumi.String("Policy for Lambda VPC access"),
 		Policy: pulumi.String(`{
 			"Version": "2012-10-17",
 			"Statement": [
-				{
-					"Effect": "Allow",
-					"Action": [
-						"rds:DescribeDBInstances",
-						"rds:DescribeDBLogFiles",
-						"rds:DownloadDBLogFilePortion",
-						"rds:DownloadCompleteDBLogFile"
-					],
-					"Resource": "*"
-				},
-				{
-					"Effect": "Allow",
-					"Action": [
-						"dynamodb:GetItem",
-						"dynamodb:PutItem",
-						"dynamodb:UpdateItem",
-						"dynamodb:Query",
-						"dynamodb:Scan",
-						"dynamodb:GetRecords",
-						"dynamodb:GetShardIterator",
-						"dynamodb:DescribeStream",
-						"dynamodb:ListStreams"
-					],
-					"Resource": "*"
-				},
-				{
-					"Effect": "Allow",
-					"Action": [
-						"sqs:SendMessage",
-						"sqs:ReceiveMessage",
-						"sqs:DeleteMessage",
-						"sqs:GetQueueAttributes"
-					],
-					"Resource": "*"
-				},
-				{
-					"Effect": "Allow",
-					"Action": [
-						"s3:PutObject",
-						"s3:GetObject",
-						"s3:ListBucket"
-					],
-					"Resource": [
-						"*"
-					]
-				},
 				{
 					"Effect": "Allow",
 					"Action": [
@@ -221,16 +153,274 @@ func CreateBackupResources(ctx *pulumi.Context, cfg *config.Config, networkStack
 				}
 			]
 		}`),
-		Tags: CreateResourceTags(ctx, cfg.Tags, "aurora-log-backup-lambda-policy"),
+		Tags: CreateResourceTags(ctx, cfg.Tags, "lambda-vpc-access-policy"),
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	// Attach custom policy to Lambda role
-	_, err = iam.NewRolePolicyAttachment(ctx, "lambda-custom-policy", &iam.RolePolicyAttachmentArgs{
-		Role:      lambdaRole.Name,
-		PolicyArn: lambdaPolicy.Arn,
+	// Create IAM role for DB Scanner Lambda
+	dbScannerRole, err := iam.NewRole(ctx, "aurora-db-scanner-role", &iam.RoleArgs{
+		AssumeRolePolicy: pulumi.String(`{
+			"Version": "2012-10-17",
+			"Statement": [{
+				"Action": "sts:AssumeRole",
+				"Principal": {
+					"Service": "lambda.amazonaws.com"
+				},
+				"Effect": "Allow",
+				"Sid": ""
+			}]
+		}`),
+		Tags: CreateResourceTags(ctx, cfg.Tags, "aurora-db-scanner-role"),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Attach basic execution policy to DB Scanner role
+	_, err = iam.NewRolePolicyAttachment(ctx, "db-scanner-basic-execution", &iam.RolePolicyAttachmentArgs{
+		Role:      dbScannerRole.Name,
+		PolicyArn: pulumi.String("arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Attach VPC access policy to DB Scanner role
+	_, err = iam.NewRolePolicyAttachment(ctx, "db-scanner-vpc-access", &iam.RolePolicyAttachmentArgs{
+		Role:      dbScannerRole.Name,
+		PolicyArn: commonVpcPolicy.Arn,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Create custom policy for DB Scanner Lambda
+	dbScannerPolicy, err := iam.NewPolicy(ctx, "db-scanner-policy", &iam.PolicyArgs{
+		Description: pulumi.String("Policy for Aurora DB Scanner Lambda"),
+		Policy: pulumi.All(queue.Arn).ApplyT(func(args []interface{}) string {
+			queueArn := args[0].(string)
+			return `{
+				"Version": "2012-10-17",
+				"Statement": [
+					{
+						"Effect": "Allow",
+						"Action": [
+							"rds:DescribeDBInstances"
+						],
+						"Resource": "*"
+					},
+					{
+						"Effect": "Allow",
+						"Action": [
+							"sqs:SendMessage"
+						],
+						"Resource": "` + queueArn + `"
+					}
+				]
+			}`
+		}).(pulumi.StringOutput),
+		Tags: CreateResourceTags(ctx, cfg.Tags, "db-scanner-policy"),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Attach custom policy to DB Scanner role
+	_, err = iam.NewRolePolicyAttachment(ctx, "db-scanner-custom-policy", &iam.RolePolicyAttachmentArgs{
+		Role:      dbScannerRole.Name,
+		PolicyArn: dbScannerPolicy.Arn,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Create IAM role for Log Detector Lambda
+	logDetectorRole, err := iam.NewRole(ctx, "aurora-log-detector-role", &iam.RoleArgs{
+		AssumeRolePolicy: pulumi.String(`{
+			"Version": "2012-10-17",
+			"Statement": [{
+				"Action": "sts:AssumeRole",
+				"Principal": {
+					"Service": "lambda.amazonaws.com"
+				},
+				"Effect": "Allow",
+				"Sid": ""
+			}]
+		}`),
+		Tags: CreateResourceTags(ctx, cfg.Tags, "aurora-log-detector-role"),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Attach basic execution policy to Log Detector role
+	_, err = iam.NewRolePolicyAttachment(ctx, "log-detector-basic-execution", &iam.RolePolicyAttachmentArgs{
+		Role:      logDetectorRole.Name,
+		PolicyArn: pulumi.String("arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Attach VPC access policy to Log Detector role
+	_, err = iam.NewRolePolicyAttachment(ctx, "log-detector-vpc-access", &iam.RolePolicyAttachmentArgs{
+		Role:      logDetectorRole.Name,
+		PolicyArn: commonVpcPolicy.Arn,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Create custom policy for Log Detector Lambda
+	logDetectorPolicy, err := iam.NewPolicy(ctx, "log-detector-policy", &iam.PolicyArgs{
+		Description: pulumi.String("Policy for Aurora Log Detector Lambda"),
+		Policy: pulumi.All(queue.Arn, dynamoTable.Arn).ApplyT(func(args []interface{}) string {
+			queueArn := args[0].(string)
+			dynamoArn := args[1].(string)
+			return `{
+				"Version": "2012-10-17",
+				"Statement": [
+					{
+						"Effect": "Allow",
+						"Action": [
+							"rds:DescribeDBLogFiles"
+						],
+						"Resource": "*"
+					},
+					{
+						"Effect": "Allow",
+						"Action": [
+							"sqs:ReceiveMessage",
+							"sqs:DeleteMessage",
+							"sqs:GetQueueAttributes"
+						],
+						"Resource": "` + queueArn + `"
+					},
+					{
+						"Effect": "Allow",
+						"Action": [
+							"dynamodb:GetItem",
+							"dynamodb:PutItem",
+							"dynamodb:UpdateItem"
+						],
+						"Resource": "` + dynamoArn + `"
+					}
+				]
+			}`
+		}).(pulumi.StringOutput),
+		Tags: CreateResourceTags(ctx, cfg.Tags, "log-detector-policy"),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Attach custom policy to Log Detector role
+	_, err = iam.NewRolePolicyAttachment(ctx, "log-detector-custom-policy", &iam.RolePolicyAttachmentArgs{
+		Role:      logDetectorRole.Name,
+		PolicyArn: logDetectorPolicy.Arn,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Create IAM role for Log Downloader Lambda
+	logDownloaderRole, err := iam.NewRole(ctx, "aurora-log-downloader-role", &iam.RoleArgs{
+		AssumeRolePolicy: pulumi.String(`{
+			"Version": "2012-10-17",
+			"Statement": [{
+				"Action": "sts:AssumeRole",
+				"Principal": {
+					"Service": "lambda.amazonaws.com"
+				},
+				"Effect": "Allow",
+				"Sid": ""
+			}]
+		}`),
+		Tags: CreateResourceTags(ctx, cfg.Tags, "aurora-log-downloader-role"),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Attach basic execution policy to Log Downloader role
+	_, err = iam.NewRolePolicyAttachment(ctx, "log-downloader-basic-execution", &iam.RolePolicyAttachmentArgs{
+		Role:      logDownloaderRole.Name,
+		PolicyArn: pulumi.String("arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Attach VPC access policy to Log Downloader role
+	_, err = iam.NewRolePolicyAttachment(ctx, "log-downloader-vpc-access", &iam.RolePolicyAttachmentArgs{
+		Role:      logDownloaderRole.Name,
+		PolicyArn: commonVpcPolicy.Arn,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Create custom policy for Log Downloader Lambda
+	logDownloaderPolicy, err := iam.NewPolicy(ctx, "log-downloader-policy", &iam.PolicyArgs{
+		Description: pulumi.String("Policy for Aurora Log Downloader Lambda"),
+		Policy: pulumi.All(dynamoTable.Arn, logBucket.Arn).ApplyT(func(args []interface{}) string {
+			dynamoArn := args[0].(string)
+			bucketArn := args[1].(string)
+			return `{
+				"Version": "2012-10-17",
+				"Statement": [
+					{
+						"Effect": "Allow",
+						"Action": [
+							"rds:DownloadDBLogFilePortion",
+							"rds:DownloadCompleteDBLogFile"
+						],
+						"Resource": "*"
+					},
+					{
+						"Effect": "Allow",
+						"Action": [
+							"dynamodb:GetItem",
+							"dynamodb:UpdateItem",
+							"dynamodb:GetRecords",
+							"dynamodb:GetShardIterator",
+							"dynamodb:DescribeStream",
+							"dynamodb:ListStreams"
+						],
+						"Resource": [
+							"` + dynamoArn + `",
+							"` + dynamoArn + `/stream/*"
+						]
+					},
+					{
+						"Effect": "Allow",
+						"Action": [
+							"s3:PutObject"
+						],
+						"Resource": "` + bucketArn + `/*"
+					},
+					{
+						"Effect": "Allow",
+						"Action": [
+							"s3:ListBucket"
+						],
+						"Resource": "` + bucketArn + `"
+					}
+				]
+			}`
+		}).(pulumi.StringOutput),
+		Tags: CreateResourceTags(ctx, cfg.Tags, "log-downloader-policy"),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Attach custom policy to Log Downloader role
+	_, err = iam.NewRolePolicyAttachment(ctx, "log-downloader-custom-policy", &iam.RolePolicyAttachmentArgs{
+		Role:      logDownloaderRole.Name,
+		PolicyArn: logDownloaderPolicy.Arn,
 	})
 	if err != nil {
 		return nil, err
@@ -259,7 +449,7 @@ func CreateBackupResources(ctx *pulumi.Context, cfg *config.Config, networkStack
 	dbScannerLambda, err := lambda.NewFunction(ctx, "aurora-db-scanner", &lambda.FunctionArgs{
 		PackageType: pulumi.String("Image"),
 		ImageUri:    pulumi.Sprintf("%s:%s", dbScannerRepoUrl, cfg.Images.DBScannerVersion),
-		Role:        lambdaRole.Arn,
+		Role:        dbScannerRole.Arn,
 		MemorySize:  pulumi.Int(cfg.Lambda.DBScannerMemory),
 		Timeout:     pulumi.Int(cfg.Lambda.DBScannerTimeout),
 		Publish:     pulumi.Bool(cfg.Lambda.PublishVersions),
@@ -306,7 +496,7 @@ func CreateBackupResources(ctx *pulumi.Context, cfg *config.Config, networkStack
 	logDetectorLambda, err := lambda.NewFunction(ctx, "aurora-log-detector", &lambda.FunctionArgs{
 		PackageType: pulumi.String("Image"),
 		ImageUri:    pulumi.Sprintf("%s:%s", logDetectorRepoUrl, cfg.Images.LogDetectorVersion),
-		Role:        lambdaRole.Arn,
+		Role:        logDetectorRole.Arn,
 		MemorySize:  pulumi.Int(cfg.Lambda.LogDetectorMemory),
 		Timeout:     pulumi.Int(cfg.Lambda.LogDetectorTimeout),
 		Publish:     pulumi.Bool(cfg.Lambda.PublishVersions),
@@ -328,6 +518,7 @@ func CreateBackupResources(ctx *pulumi.Context, cfg *config.Config, networkStack
 				"DYNAMODB_TABLE_NAME": dynamoTable.Name,
 				"LOG_LEVEL":           pulumi.String("error"),
 				"BACKUP_LOGS":         pulumi.String(cfg.Lambda.BackupLogTypes),
+				"TTL_DAYS":            pulumi.String("7"),
 			},
 		},
 		TracingConfig: &lambda.FunctionTracingConfigArgs{
@@ -354,7 +545,7 @@ func CreateBackupResources(ctx *pulumi.Context, cfg *config.Config, networkStack
 	logDownloaderLambda, err := lambda.NewFunction(ctx, "aurora-log-downloader", &lambda.FunctionArgs{
 		PackageType: pulumi.String("Image"),
 		ImageUri:    pulumi.Sprintf("%s:%s", logDownloaderRepoUrl, cfg.Images.LogDownloaderVersion),
-		Role:        lambdaRole.Arn,
+		Role:        logDownloaderRole.Arn,
 		MemorySize:  pulumi.Int(cfg.Lambda.LogDownloaderMemory),
 		Timeout:     pulumi.Int(cfg.Lambda.LogDownloaderTimeout),
 		Publish:     pulumi.Bool(cfg.Lambda.PublishVersions),
@@ -377,6 +568,7 @@ func CreateBackupResources(ctx *pulumi.Context, cfg *config.Config, networkStack
 				"S3_BUCKET_NAME":      logBucket.ID(),
 				"S3_PREFIX":           pulumi.String(cfg.Lambda.S3LogPrefix),
 				"LOG_LEVEL":           pulumi.String("error"),
+				"TTL_DAYS":            pulumi.String("7"),
 			},
 		},
 		TracingConfig: &lambda.FunctionTracingConfigArgs{
@@ -456,7 +648,9 @@ func CreateBackupResources(ctx *pulumi.Context, cfg *config.Config, networkStack
 		LogBucket:                logBucket,
 		DynamoDBTable:            dynamoTable,
 		SQSQueue:                 queue,
-		LambdaRole:               lambdaRole,
+		DBScannerRole:            dbScannerRole,
+		LogDetectorRole:          logDetectorRole,
+		LogDownloaderRole:        logDownloaderRole,
 		DBScannerLambda:          dbScannerLambda,
 		DBScannerLambdaAlias:     dbScannerAlias,
 		LogDetectorLambda:        logDetectorLambda,
