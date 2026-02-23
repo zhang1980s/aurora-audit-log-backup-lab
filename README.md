@@ -97,10 +97,13 @@ graph TD
 
 ## Project Structure
 
-The infrastructure code is organized into two separate Pulumi stacks to solve the circular dependency between ECR repositories and Lambda functions:
+The infrastructure code is organized into five separate Pulumi stacks, deployed in order:
 
-- `infrastructure/ecr-stack`: Manages only the ECR repositories
-- `infrastructure/aurora-log-backup-lab-stack`: Manages all other resources and references the ECR repositories from the ECR stack
+- `infrastructure/ecr-stack`: ECR repositories for Lambda container images
+- `infrastructure/network-stack`: VPC, subnets, VPC endpoints
+- `infrastructure/aurora-cluster-stack`: Aurora MySQL cluster with audit logging
+- `infrastructure/backup-solution-stack`: Lambda functions, DynamoDB, SQS, S3, EventBridge (references network-stack and ecr-stack outputs)
+- `infrastructure/ec2-stress-client-stack`: EC2 instance for stress testing
 
 ## Prerequisites
 
@@ -137,12 +140,36 @@ This will:
 - Push the images to ECR
 - Update the Pulumi configuration with the new version
 
-### Step 3: Deploy Main Infrastructure
-
-Deploy the Aurora stack which references the existing ECR repositories:
+### Step 3: Deploy Network Infrastructure
 
 ```bash
-cd infrastructure/aurora-log-backup-lab-stack
+cd infrastructure/network-stack
+pulumi stack init dev
+pulumi up
+```
+
+### Step 4: Deploy Aurora Cluster
+
+```bash
+cd infrastructure/aurora-cluster-stack
+pulumi stack init dev
+pulumi up
+```
+
+### Step 5: Deploy Backup Solution
+
+Deploy the backup solution which references the ECR and network stack outputs:
+
+```bash
+cd infrastructure/backup-solution-stack
+pulumi stack init dev
+pulumi up
+```
+
+### Step 6: Deploy EC2 Stress Client (Optional)
+
+```bash
+cd infrastructure/ec2-stress-client-stack
 pulumi stack init dev
 pulumi up
 ```
@@ -212,14 +239,22 @@ After deployment, you can connect to the EC2 instance and run the provided test 
 
 ## Cleanup
 
-To destroy all resources:
+To destroy all resources (reverse deployment order):
 
 ```bash
-# Destroy the Aurora stack first
-cd infrastructure/aurora-log-backup-lab-stack
+# Destroy stacks in reverse order
+cd infrastructure/ec2-stress-client-stack
 pulumi destroy
 
-# Then destroy the ECR stack
+cd ../backup-solution-stack
+pulumi destroy
+
+cd ../aurora-cluster-stack
+pulumi destroy
+
+cd ../network-stack
+pulumi destroy
+
 cd ../ecr-stack
 pulumi destroy
 ```
@@ -440,7 +475,10 @@ Each function should use the appropriate container image, memory settings, timeo
 Configuration values are stored in the Pulumi stack configuration files:
 
 - `infrastructure/ecr-stack/Pulumi.dev.yaml`
-- `infrastructure/aurora-log-backup-lab-stack/Pulumi.dev.yaml`
+- `infrastructure/network-stack/Pulumi.dev.yaml`
+- `infrastructure/aurora-cluster-stack/Pulumi.dev.yaml`
+- `infrastructure/backup-solution-stack/Pulumi.dev.yaml`
+- `infrastructure/ec2-stress-client-stack/Pulumi.dev.yaml`
 
 You can modify these files to customize the deployment.
 
