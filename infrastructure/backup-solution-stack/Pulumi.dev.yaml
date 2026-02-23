@@ -1,23 +1,37 @@
 config:
   aws:region: ap-southeast-1
+
+  # Mandatory tags
+  environment: dev
+  project: aurora-audit-log-backup-lab
+  owner: zzhe
+
+  # Lambda memory (MB) and timeout (seconds)
   backup-solution:dbScannerMemory: "512"
   backup-solution:dbScannerTimeout: "60"
   backup-solution:logDetectorMemory: "1024"
   backup-solution:logDetectorTimeout: "300"
   backup-solution:logDownloaderMemory: "1024"
   backup-solution:logDownloaderTimeout: "300"
-  backup-solution:sqsVisibilityTimeout: "300"
-  backup-solution:lambdaBatchSize: "10"
+
+  # EventBridge and S3
   backup-solution:eventBridgeSchedule: "rate(15 minutes)"
-  backup-solution:s3LogPrefix: "aurora-logs"
+  backup-solution:s3LogPrefix: aurora-logs
+  backup-solution:lambdaBatchSize: "10"
+
+  # Optional: SQS visibility timeout (defaults to logDetectorTimeout if omitted)
+  backup-solution:sqsVisibilityTimeout: "300"
+
+  # Lambda versioning
   backup-solution:publishLambdaVersions: "true"
-  backup-solution:backupLogTypes: "audit,error,instance"
-  backup-solution:instanceEngine: "aurora-mysql,aurora-postgresql"
-  backup-solution:blackList: ""
+  backup-solution:dbScannerImageVersion: v1.0.0
+  backup-solution:logDetectorImageVersion: v1.0.0
+  backup-solution:logDownloaderImageVersion: v1.0.0
+
+  # Log backup settings
+  backup-solution:backupLogTypes: audit
+  backup-solution:instanceEngine: aurora-mysql,aurora-postgresql
   backup-solution:ttlDays: "3"
-  backup-solution:dbScannerImageVersion: "v1.0.6"
-  backup-solution:logDetectorImageVersion: "v1.0.6"
-  backup-solution:logDownloaderImageVersion: "v1.0.6"
-  backup-solution:environment: dev
-  backup-solution:owner: zzhe
-  backup-solution:project: aurora-audit-log-backup-lab
+
+  # Custom tags
+  customTags: '{"Application": "AuroraAuditLogBackup", "Environment": "Lab", "auto-delete": "no", "Team": "personal"}'

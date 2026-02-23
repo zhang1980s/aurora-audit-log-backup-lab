@@ -11,15 +11,17 @@ import (
 
 // Config holds all configuration for the Lambda function
 type Config struct {
-	DynamoDBTableName string
-	S3BucketName      string
-	S3Prefix          string
-	LogLevel          string
-	DownloadTimeout   time.Duration
-	RetryAttempts     int
-	RetryDelay        time.Duration
-	Region            string
-	TTLDays           int // Number of days for TTL expiration
+	DynamoDBTableName  string
+	S3BucketName       string
+	S3Prefix           string
+	LogLevel           string
+	DownloadTimeout    time.Duration
+	RetryAttempts      int
+	RetryDelay         time.Duration
+	Region             string
+	TTLDays            int    // Number of days for TTL expiration
+	RDSEndpointType    string // "public" or "private" - controls RDS API endpoint used for log download
+	RDSVpcEndpointURL  string // Custom VPC endpoint URL (e.g., "vpce-xxx.rds.us-east-1.vpce.amazonaws.com"), used when RDS_ENDPOINT_TYPE=private
 }
 
 // Load loads configuration from environment variables
@@ -30,6 +32,19 @@ func Load() (*Config, error) {
 		S3Prefix:          os.Getenv("S3_PREFIX"),
 		LogLevel:          os.Getenv("LOG_LEVEL"),
 		Region:            os.Getenv("AWS_REGION"),
+		RDSEndpointType:   os.Getenv("RDS_ENDPOINT_TYPE"),
+		RDSVpcEndpointURL: os.Getenv("RDS_VPC_ENDPOINT_URL"),
+	}
+
+	// Default RDS endpoint type to public
+	if cfg.RDSEndpointType == "" {
+		cfg.RDSEndpointType = "public"
+	}
+	if cfg.RDSEndpointType != "public" && cfg.RDSEndpointType != "private" {
+		return nil, errors.Wrap(errors.ErrConfiguration, "RDS_ENDPOINT_TYPE must be 'public' or 'private'")
+	}
+	if cfg.RDSEndpointType == "private" && cfg.RDSVpcEndpointURL == "" {
+		return nil, errors.Wrap(errors.ErrConfiguration, "RDS_VPC_ENDPOINT_URL is required when RDS_ENDPOINT_TYPE=private")
 	}
 
 	// Set defaults
@@ -104,7 +119,7 @@ func Load() (*Config, error) {
 // String returns a string representation of the configuration
 func (c *Config) String() string {
 	return fmt.Sprintf(
-		"Config{DynamoDBTableName: %s, S3BucketName: %s, S3Prefix: %s, LogLevel: %s, DownloadTimeout: %v, RetryAttempts: %d, RetryDelay: %v, Region: %s, TTLDays: %d}",
+		"Config{DynamoDBTableName: %s, S3BucketName: %s, S3Prefix: %s, LogLevel: %s, DownloadTimeout: %v, RetryAttempts: %d, RetryDelay: %v, Region: %s, TTLDays: %d, RDSEndpointType: %s, RDSVpcEndpointURL: %s}",
 		c.DynamoDBTableName,
 		c.S3BucketName,
 		c.S3Prefix,
@@ -114,5 +129,7 @@ func (c *Config) String() string {
 		c.RetryDelay,
 		c.Region,
 		c.TTLDays,
+		c.RDSEndpointType,
+		c.RDSVpcEndpointURL,
 	)
 }

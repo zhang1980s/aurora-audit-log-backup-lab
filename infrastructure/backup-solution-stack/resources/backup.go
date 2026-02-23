@@ -152,6 +152,15 @@ func CreateBackupResources(ctx *pulumi.Context, cfg *config.Config, networkStack
 						"xray:GetSamplingStatisticSummaries"
 					],
 					"Resource": "*"
+				},
+				{
+					"Effect": "Allow",
+					"Action": [
+						"ecr:GetDownloadUrlForLayer",
+						"ecr:BatchGetImage",
+						"ecr:GetAuthorizationToken"
+					],
+					"Resource": "*"
 				}
 			]
 		}`),

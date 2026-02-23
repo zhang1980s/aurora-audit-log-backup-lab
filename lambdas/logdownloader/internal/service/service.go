@@ -164,8 +164,16 @@ func (s *LogDownloaderService) DownloadLogFile(ctx context.Context, dbInstanceID
 	}
 	credSubsegment.Close(nil)
 
-	// Format host and canonical URI
-	host := fmt.Sprintf("rds.%s.amazonaws.com", region)
+	// Format host and canonical URI based on endpoint type
+	var host string
+	if s.cfg.RDSEndpointType == "private" {
+		host = s.cfg.RDSVpcEndpointURL
+		s.logger.Debugw("Using private VPC endpoint for RDS API", "vpcEndpoint", host)
+	} else {
+		host = fmt.Sprintf("rds.%s.amazonaws.com", region)
+	}
+	xray.AddMetadata(ctx, "rds_endpoint_type", s.cfg.RDSEndpointType)
+	xray.AddMetadata(ctx, "rds_host", host)
 	canonicalURI := fmt.Sprintf("/v13/downloadCompleteLogFile/%s/%s", dbInstanceID, logFileName)
 
 	// Create timestamp
